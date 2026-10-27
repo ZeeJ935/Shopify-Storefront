@@ -75,12 +75,21 @@ async function postToken(body: URLSearchParams) {
   return json;
 }
 
-function toSession(token: TokenResponse): CustomerSession {
+function toSession(
+  token: TokenResponse,
+  previous?: CustomerSession | null,
+): CustomerSession {
+  const expiresIn =
+    typeof token.expires_in === "number" && token.expires_in > 0
+      ? token.expires_in
+      : 3600;
+
   return {
     accessToken: token.access_token,
     refreshToken: token.refresh_token,
-    expiresAt: Date.now() + token.expires_in * 1000,
-    idToken: token.id_token,
+    expiresAt: Date.now() + expiresIn * 1000,
+    // Refresh responses often omit id_token — keep the previous one for logout.
+    idToken: token.id_token || previous?.idToken,
   };
 }
 
@@ -110,6 +119,7 @@ export async function completeCustomerAuthorization(input: {
 
 export async function refreshCustomerSession(
   refreshToken: string,
+  previous?: CustomerSession | null,
 ): Promise<CustomerSession> {
   const config = getCustomerAccountConfig();
   const body = new URLSearchParams({
@@ -119,13 +129,19 @@ export async function refreshCustomerSession(
   });
 
   const token = await postToken(body);
-  const session = toSession(token);
+  const session = toSession(token, previous);
   await setCustomerSession(session);
   return session;
 }
 
 export async function buildCustomerLogoutUrl(idToken?: string) {
   const config = getCustomerAccountConfig();
+
+  // Shopify requires a valid id_token_hint; without one, skip hosted logout.
+  if (!idToken) {
+    return config.logoutRedirectUrl;
+  }
+
   const { openid } = await getCustomerAccountDiscovery();
 
   if (!openid.end_session_endpoint) {
@@ -133,9 +149,7 @@ export async function buildCustomerLogoutUrl(idToken?: string) {
   }
 
   const url = new URL(openid.end_session_endpoint);
+  url.searchParams.set("id_token_hint", idToken);
   url.searchParams.set("post_logout_redirect_uri", config.logoutRedirectUrl);
-  if (idToken) {
-    url.searchParams.set("id_token_hint", idToken);
-  }
   return url.toString();
 }

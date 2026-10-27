@@ -1,10 +1,6 @@
 import { getCustomerAccountDiscovery } from "./discovery";
 import { refreshCustomerSession } from "./oauth";
-import {
-  getCustomerSession,
-  setCustomerSession,
-  type CustomerSession,
-} from "./session";
+import { getCustomerSession, type CustomerSession } from "./session";
 
 export type CustomerProfile = {
   id: string;
@@ -71,7 +67,7 @@ async function ensureFreshSession(): Promise<CustomerSession> {
   }
 
   try {
-    return await refreshCustomerSession(session.refreshToken);
+    return await refreshCustomerSession(session.refreshToken, session);
   } catch {
     throw new Error("UNAUTHORIZED");
   }
@@ -100,8 +96,10 @@ export async function customerAccountFetch<T>(
   let response = await run(session.accessToken);
 
   if (response.status === 401) {
-    const refreshed = await refreshCustomerSession(session.refreshToken);
-    await setCustomerSession(refreshed);
+    const refreshed = await refreshCustomerSession(
+      session.refreshToken,
+      session,
+    );
     response = await run(refreshed.accessToken);
   }
 
@@ -126,35 +124,64 @@ export async function customerAccountFetch<T>(
 }
 
 export async function getCustomerProfile(): Promise<CustomerProfile> {
-  const data = await customerAccountFetch<{
-    customer: {
-      id: string;
-      displayName: string;
-      firstName: string | null;
-      lastName: string | null;
-      emailAddress: { emailAddress: string } | null;
-    };
-  }>(`
-    query CustomerProfile {
-      customer {
-        id
-        displayName
-        firstName
-        lastName
-        emailAddress {
-          emailAddress
+  try {
+    const data = await customerAccountFetch<{
+      customer: {
+        id: string;
+        displayName: string;
+        firstName: string | null;
+        lastName: string | null;
+        emailAddress: { emailAddress: string } | null;
+      };
+    }>(`
+      query CustomerProfile {
+        customer {
+          id
+          displayName
+          firstName
+          lastName
+          emailAddress {
+            emailAddress
+          }
         }
       }
-    }
-  `);
+    `);
 
-  return {
-    id: data.customer.id,
-    displayName: data.customer.displayName,
-    firstName: data.customer.firstName,
-    lastName: data.customer.lastName,
-    email: data.customer.emailAddress?.emailAddress ?? null,
-  };
+    return {
+      id: data.customer.id,
+      displayName: data.customer.displayName,
+      firstName: data.customer.firstName,
+      lastName: data.customer.lastName,
+      email: data.customer.emailAddress?.emailAddress ?? null,
+    };
+  } catch {
+    // emailAddress can fail without Protected Customer Data approval
+    const data = await customerAccountFetch<{
+      customer: {
+        id: string;
+        displayName: string;
+        firstName: string | null;
+        lastName: string | null;
+      };
+    }>(`
+      query CustomerProfileBasic {
+        customer {
+          id
+          displayName
+          firstName
+          lastName
+        }
+      }
+    `);
+
+    return {
+      id: data.customer.id,
+      displayName: data.customer.displayName,
+      firstName: data.customer.firstName,
+      lastName: data.customer.lastName,
+      email: null,
+    };
+  }
 }
 
 export async function getCustomerAddresses(): Promise<CustomerAddress[]> {
