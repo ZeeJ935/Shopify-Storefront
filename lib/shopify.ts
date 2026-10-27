@@ -1,0 +1,79 @@
+const storeDomain = process.env.SHOPIFY_STORE_DOMAIN?.trim();
+const storefrontToken = process.env.SHOPIFY_STOREFRONT_ACCESS_TOKEN?.trim();
+
+export type ShopifyFetchOptions = {
+  /** Seconds. Omit or undefined keeps cache: "no-store" (cart / session). */
+  revalidate?: number;
+};
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.name === "AbortError" ||
+    error.name === "TimeoutError" ||
+    /aborted|timeout/i.test(error.message)
+  );
+}
+
+export async function shopifyFetch<T>(
+  query: string,
+  variables: Record<string, unknown> = {},
+  options: ShopifyFetchOptions = {},
+): Promise<T> {
+  if (!storeDomain || !storefrontToken) {
+    throw new Error("Missing Shopify environment variables.");
+  }
+
+  const useRevalidate =
+    typeof options.revalidate === "number" && options.revalidate >= 0;
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://${storeDomain}/api/2026-10/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Storefront-Access-Token": storefrontToken,
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(20_000),
+        ...(useRevalidate
+          ? { next: { revalidate: options.revalidate } }
+          : { cache: "no-store" as const }),
+      },
+    );
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error("Shopify request timed out.");
+    }
+    throw new Error("Shopify network request failed.");
+  }
+
+  if (!response.ok) {
+    throw new Error(`Shopify API request failed: ${response.status}`);
+  }
+
+  let result: { data?: T; errors?: unknown };
+  try {
+    result = (await response.json()) as { data?: T; errors?: unknown };
+  } catch {
+    throw new Error("Shopify returned an invalid response.");
+  }
+
+  if (result.errors) {
+    throw new Error("Shopify GraphQL request failed.");
+  }
+
+  if (result.data === undefined || result.data === null) {
+    throw new Error("Shopify returned no data.");
+  }
+
+  return result.data;
+}
+
+/** Default revalidate window for catalog / homepage queries. */
+export const CATALOG_REVALIDATE = 120;
