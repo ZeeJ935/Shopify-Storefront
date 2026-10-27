@@ -26,6 +26,7 @@ type SiteHeaderShellProps = {
   hasSale: boolean;
   cartQuantity: number;
   shopName?: string;
+  isAuthenticated?: boolean;
 };
 
 function CartIcon() {
@@ -90,12 +91,14 @@ export default function SiteHeaderShell({
   hasSale,
   cartQuantity,
   shopName = siteBrand.name,
+  isAuthenticated = false,
 }: SiteHeaderShellProps) {
   const [scrolled, setScrolled] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [accordionId, setAccordionId] = useState<string | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
   const openTimer = useRef<number | null>(null);
   const closeTimer = useRef<number | null>(null);
   const megaId = useId();
@@ -265,6 +268,53 @@ export default function SiteHeaderShell({
             >
               <SearchIcon />
             </button>
+            <div
+              className="relative hidden sm:block"
+              onMouseEnter={() => setAccountOpen(true)}
+              onMouseLeave={() => setAccountOpen(false)}
+            >
+              <Link
+                href={isAuthenticated ? "/account" : "/account/login"}
+                className="inline-flex h-11 items-center px-3 text-sm font-medium uppercase tracking-wide text-ink hover:bg-mist/60"
+                aria-expanded={accountOpen}
+                onFocus={() => setAccountOpen(true)}
+              >
+                Account
+              </Link>
+              {accountOpen ? (
+                <div className="absolute right-0 top-full z-50 min-w-[11rem] border border-mist bg-snow py-2 shadow-sm">
+                  {isAuthenticated ? (
+                    <>
+                      <Link
+                        href="/account"
+                        className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
+                      >
+                        Account
+                      </Link>
+                      <Link
+                        href="/account/orders"
+                        className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
+                      >
+                        Orders
+                      </Link>
+                      <Link
+                        href="/account/logout"
+                        className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
+                      >
+                        Log out
+                      </Link>
+                    </>
+                  ) : (
+                    <Link
+                      href="/account/login"
+                      className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
+                    >
+                      Log in / Sign up
+                    </Link>
+                  )}
+                </div>
+              ) : null}
+            </div>
             <Link
               href="/cart"
               className="relative inline-flex h-11 min-w-11 items-center justify-center gap-2 px-2 text-sm font-medium text-ink hover:bg-mist/60"
@@ -635,7 +685,40 @@ export default function SiteHeaderShell({
                 </div>
               ))}
             </nav>
-            <div className="border-t border-mist p-4">
+            <div className="space-y-2 border-t border-mist p-4">
+              {isAuthenticated ? (
+                <>
+                  <Link
+                    href="/account"
+                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    Account
+                  </Link>
+                  <Link
+                    href="/account/orders"
+                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    Orders
+                  </Link>
+                  <Link
+                    href="/account/logout"
+                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    Log out
+                  </Link>
+                </>
+              ) : (
+                <Link
+                  href="/account/login"
+                  className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  Account
+                </Link>
+              )}
               <Link
                 href="/cart"
                 className="btn btn-primary w-full"

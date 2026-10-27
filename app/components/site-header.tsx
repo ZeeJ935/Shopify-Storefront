@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getCart } from "@/lib/cart";
 import { CART_COOKIE } from "@/lib/cart-cookie";
 import { getNavCatalog } from "@/lib/catalog";
+import { hasCustomerSession } from "@/lib/customer-account/session";
 import { siteBrand } from "@/lib/site-content";
 import SiteHeaderShell from "./site-header-shell";
 
@@ -19,7 +20,10 @@ export default async function SiteHeader() {
     }
   }
 
-  const catalog = await getNavCatalog();
+  const [catalog, signedIn] = await Promise.all([
+    getNavCatalog(),
+    hasCustomerSession(),
+  ]);
 
   return (
     <SiteHeaderShell
@@ -30,6 +34,7 @@ export default async function SiteHeader() {
       hasSale={catalog.collections.has("sale")}
       cartQuantity={totalQuantity}
       shopName={siteBrand.name}
+      isAuthenticated={signedIn}
     />
   );
 }
