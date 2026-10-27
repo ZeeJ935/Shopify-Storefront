@@ -5,15 +5,15 @@ import {
   randomBytes,
 } from "node:crypto";
 import { cookies } from "next/headers";
+import type { NextResponse } from "next/server";
 import { getCustomerAccountConfig } from "./config";
 
-export const CUSTOMER_SESSION_COOKIE = "zj-customer-session";
-export const CUSTOMER_ID_TOKEN_COOKIE = "zj-customer-id";
-export const CUSTOMER_PKCE_COOKIE = "zj-customer-pkce";
+export const CUSTOMER_SESSION_COOKIE = "zj-ca-session";
+export const CUSTOMER_ID_TOKEN_COOKIE = "zj-ca-id";
+export const CUSTOMER_PKCE_COOKIE = "zj-ca-pkce";
 
-/** Stay under typical ~4KB browser cookie limits (name + attributes). */
-const COOKIE_CHUNK_SIZE = 3000;
-const MAX_CHUNKS = 8;
+const COOKIE_CHUNK_SIZE = 2800;
+const MAX_CHUNKS = 6;
 
 export type CustomerSession = {
   accessToken: string;
@@ -63,19 +63,14 @@ function unseal<T>(token: string, secret: string): T | null {
   }
 }
 
-function cookieBase(maxAge: number) {
-  const secure =
-    process.env.NODE_ENV === "production" ||
-    process.env.VERCEL === "1" ||
-    process.env.SHOPIFY_CUSTOMER_ACCOUNT_CALLBACK_URL?.startsWith("https://") ===
-      true;
-
+function cookieOptions(maxAge: number) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
     path: "/",
     maxAge,
-    secure,
+    // Secure on Vercel/production; allow plain HTTP for local `next dev`
+    secure: process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL),
   };
 }
 
@@ -83,22 +78,25 @@ function chunkName(base: string, index: number) {
   return `${base}.${index}`;
 }
 
-async function clearChunkedCookie(base: string) {
-  const store = await cookies();
-  const opts = cookieBase(0);
-  store.set(base, "", opts);
+function clearChunkedOnResponse(response: NextResponse, base: string) {
+  const opts = cookieOptions(0);
+  response.cookies.set(base, "", opts);
   for (let i = 0; i < MAX_CHUNKS; i++) {
-    store.set(chunkName(base, i), "", opts);
+    response.cookies.set(chunkName(base, i), "", opts);
   }
 }
 
-async function setChunkedCookie(base: string, value: string, maxAge: number) {
-  const store = await cookies();
-  await clearChunkedCookie(base);
-  const opts = cookieBase(maxAge);
+function setChunkedOnResponse(
+  response: NextResponse,
+  base: string,
+  value: string,
+  maxAge: number,
+) {
+  clearChunkedOnResponse(response, base);
+  const opts = cookieOptions(maxAge);
 
   if (value.length <= COOKIE_CHUNK_SIZE) {
-    store.set(base, value, opts);
+    response.cookies.set(base, value, opts);
     return;
   }
 
@@ -108,7 +106,7 @@ async function setChunkedCookie(base: string, value: string, maxAge: number) {
   }
 
   for (let i = 0; i < chunks; i++) {
-    store.set(
+    response.cookies.set(
       chunkName(base, i),
       value.slice(i * COOKIE_CHUNK_SIZE, (i + 1) * COOKIE_CHUNK_SIZE),
       opts,
@@ -116,7 +114,7 @@ async function setChunkedCookie(base: string, value: string, maxAge: number) {
   }
 }
 
-async function getChunkedCookie(base: string): Promise<string | null> {
+async function readChunkedCookie(base: string): Promise<string | null> {
   const store = await cookies();
   const single = store.get(base)?.value;
   if (single) return single;
@@ -127,14 +125,16 @@ async function getChunkedCookie(base: string): Promise<string | null> {
     if (!part) break;
     parts.push(part);
   }
-  if (parts.length === 0) return null;
-  return parts.join("");
+  return parts.length ? parts.join("") : null;
 }
 
-export async function setPkceCookie(payload: PkcePayload) {
+export function applyPkceCookie(response: NextResponse, payload: PkcePayload) {
   const { sessionSecret } = getCustomerAccountConfig();
-  const store = await cookies();
-  store.set(CUSTOMER_PKCE_COOKIE, seal(payload, sessionSecret), cookieBase(600));
+  response.cookies.set(
+    CUSTOMER_PKCE_COOKIE,
+    seal(payload, sessionSecret),
+    cookieOptions(600),
+  );
 }
 
 export async function getPkceCookie(): Promise<PkcePayload | null> {
@@ -145,29 +145,34 @@ export async function getPkceCookie(): Promise<PkcePayload | null> {
   return unseal<PkcePayload>(value, sessionSecret);
 }
 
-export async function clearPkceCookie() {
-  const store = await cookies();
-  store.set(CUSTOMER_PKCE_COOKIE, "", cookieBase(0));
+export function clearPkceCookie(response: NextResponse) {
+  response.cookies.set(CUSTOMER_PKCE_COOKIE, "", cookieOptions(0));
 }
 
-export async function setCustomerSession(session: CustomerSession) {
+export function applyCustomerSession(
+  response: NextResponse,
+  session: CustomerSession,
+) {
   const { sessionSecret } = getCustomerAccountConfig();
   const maxAge = 60 * 60 * 24 * 30;
 
-  const core = {
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-    expiresAt: session.expiresAt,
-  };
-
-  await setChunkedCookie(
+  setChunkedOnResponse(
+    response,
     CUSTOMER_SESSION_COOKIE,
-    seal(core, sessionSecret),
+    seal(
+      {
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        expiresAt: session.expiresAt,
+      },
+      sessionSecret,
+    ),
     maxAge,
   );
 
   if (session.idToken) {
-    await setChunkedCookie(
+    setChunkedOnResponse(
+      response,
       CUSTOMER_ID_TOKEN_COOKIE,
       seal({ idToken: session.idToken }, sessionSecret),
       maxAge,
@@ -175,34 +180,45 @@ export async function setCustomerSession(session: CustomerSession) {
   }
 }
 
+export function clearCustomerSessionCookies(response: NextResponse) {
+  clearChunkedOnResponse(response, CUSTOMER_SESSION_COOKIE);
+  clearChunkedOnResponse(response, CUSTOMER_ID_TOKEN_COOKIE);
+  response.cookies.set(CUSTOMER_PKCE_COOKIE, "", cookieOptions(0));
+  // Clear legacy cookie names from earlier iterations
+  response.cookies.set("zj-customer-session", "", cookieOptions(0));
+  response.cookies.set("zj-customer-id", "", cookieOptions(0));
+  response.cookies.set("zj-customer-pkce", "", cookieOptions(0));
+  for (let i = 0; i < MAX_CHUNKS; i++) {
+    response.cookies.set(`zj-customer-session.${i}`, "", cookieOptions(0));
+    response.cookies.set(`zj-customer-id.${i}`, "", cookieOptions(0));
+  }
+}
+
 export async function getCustomerSession(): Promise<CustomerSession | null> {
   try {
     const { sessionSecret } = getCustomerAccountConfig();
-    const value = await getChunkedCookie(CUSTOMER_SESSION_COOKIE);
+    const value = await readChunkedCookie(CUSTOMER_SESSION_COOKIE);
     if (!value) return null;
 
     const session = unseal<{
       accessToken: string;
       refreshToken: string;
       expiresAt: number;
-      idToken?: string;
     }>(value, sessionSecret);
 
-    if (!session?.accessToken || !session.refreshToken || !session.expiresAt) {
+    if (
+      !session?.accessToken ||
+      !session.refreshToken ||
+      !Number.isFinite(session.expiresAt)
+    ) {
       return null;
     }
 
-    if (!Number.isFinite(session.expiresAt)) {
-      return null;
-    }
-
-    let idToken = session.idToken;
-    if (!idToken) {
-      const idValue = await getChunkedCookie(CUSTOMER_ID_TOKEN_COOKIE);
-      if (idValue) {
-        const sealed = unseal<{ idToken?: string }>(idValue, sessionSecret);
-        idToken = sealed?.idToken;
-      }
+    let idToken: string | undefined;
+    const idValue = await readChunkedCookie(CUSTOMER_ID_TOKEN_COOKIE);
+    if (idValue) {
+      const sealed = unseal<{ idToken?: string }>(idValue, sessionSecret);
+      idToken = sealed?.idToken;
     }
 
     return {
@@ -216,11 +232,10 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
   }
 }
 
-export async function clearCustomerSession() {
-  await clearChunkedCookie(CUSTOMER_SESSION_COOKIE);
-  await clearChunkedCookie(CUSTOMER_ID_TOKEN_COOKIE);
-}
-
 export async function hasCustomerSession() {
   return Boolean(await getCustomerSession());
+}
+
+export function isSessionExpiringSoon(session: CustomerSession) {
+  return session.expiresAt <= Date.now() + 60_000;
 }

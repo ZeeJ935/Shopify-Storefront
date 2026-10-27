@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { getCustomerAccountConfig } from "./config";
 import { getCustomerAccountDiscovery } from "./discovery";
 import {
@@ -6,24 +7,22 @@ import {
   createOAuthState,
 } from "./pkce";
 import {
+  applyCustomerSession,
+  applyPkceCookie,
   clearPkceCookie,
   getPkceCookie,
-  setCustomerSession,
-  setPkceCookie,
   type CustomerSession,
 } from "./session";
 
 const AUTH_SCOPES = "openid email customer-account-api:full";
 
-export async function beginCustomerAuthorization() {
+export async function beginCustomerAuthorization(requestUrl: string) {
   const config = getCustomerAccountConfig();
   const { openid } = await getCustomerAccountDiscovery();
 
   const state = createOAuthState();
   const verifier = createCodeVerifier();
   const challenge = createCodeChallenge(verifier);
-
-  await setPkceCookie({ state, verifier });
 
   const url = new URL(openid.authorization_endpoint);
   url.searchParams.set("client_id", config.clientId);
@@ -34,7 +33,11 @@ export async function beginCustomerAuthorization() {
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
 
-  return url.toString();
+  const response = NextResponse.redirect(url.toString(), 302);
+  applyPkceCookie(response, { state, verifier });
+  // Ensure absolute redirect works even if request host differs
+  void requestUrl;
+  return response;
 }
 
 type TokenResponse = {
@@ -79,16 +82,14 @@ function toSession(
   token: TokenResponse,
   previous?: CustomerSession | null,
 ): CustomerSession {
-  const expiresIn =
-    typeof token.expires_in === "number" && token.expires_in > 0
-      ? token.expires_in
-      : 3600;
+  const expiresIn = Number(token.expires_in);
+  const seconds =
+    Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600;
 
   return {
     accessToken: token.access_token,
     refreshToken: token.refresh_token,
-    expiresAt: Date.now() + expiresIn * 1000,
-    // Refresh responses often omit id_token — keep the previous one for logout.
+    expiresAt: Date.now() + seconds * 1000,
     idToken: token.id_token || previous?.idToken,
   };
 }
@@ -96,6 +97,7 @@ function toSession(
 export async function completeCustomerAuthorization(input: {
   code: string;
   state: string;
+  requestUrl: string;
 }) {
   const config = getCustomerAccountConfig();
   const pkce = await getPkceCookie();
@@ -113,31 +115,34 @@ export async function completeCustomerAuthorization(input: {
   });
 
   const token = await postToken(body);
-  await setCustomerSession(toSession(token));
-  await clearPkceCookie();
+  const session = toSession(token);
+
+  const response = NextResponse.redirect(
+    new URL("/account", input.requestUrl),
+    302,
+  );
+  applyCustomerSession(response, session);
+  clearPkceCookie(response);
+  return response;
 }
 
-export async function refreshCustomerSession(
-  refreshToken: string,
-  previous?: CustomerSession | null,
+export async function refreshCustomerSessionTokens(
+  previous: CustomerSession,
 ): Promise<CustomerSession> {
   const config = getCustomerAccountConfig();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: config.clientId,
-    refresh_token: refreshToken,
+    refresh_token: previous.refreshToken,
   });
 
   const token = await postToken(body);
-  const session = toSession(token, previous);
-  await setCustomerSession(session);
-  return session;
+  return toSession(token, previous);
 }
 
 export async function buildCustomerLogoutUrl(idToken?: string) {
   const config = getCustomerAccountConfig();
 
-  // Shopify requires a valid id_token_hint; without one, skip hosted logout.
   if (!idToken) {
     return config.logoutRedirectUrl;
   }

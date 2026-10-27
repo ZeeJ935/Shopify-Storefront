@@ -1,4 +1,3 @@
-import { cacheLife } from "next/cache";
 import { getCustomerAccountConfig } from "./config";
 
 export type OpenIdConfiguration = {
@@ -13,11 +12,14 @@ export type CustomerAccountDiscovery = {
   graphqlUrl: string;
 };
 
+let cached: { value: CustomerAccountDiscovery; at: number } | null = null;
+const CACHE_MS = 60 * 60 * 1000;
+
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
     const response = await fetch(url, {
       headers: { Accept: "application/json" },
-      next: { revalidate: 3600 },
+      cache: "no-store",
       redirect: "follow",
     });
     if (!response.ok) return null;
@@ -30,8 +32,9 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 }
 
 export async function getCustomerAccountDiscovery(): Promise<CustomerAccountDiscovery> {
-  "use cache";
-  cacheLife("hours");
+  if (cached && Date.now() - cached.at < CACHE_MS) {
+    return cached.value;
+  }
 
   const { storeDomain, shopId, apiVersion } = getCustomerAccountConfig();
 
@@ -60,8 +63,7 @@ export async function getCustomerAccountDiscovery(): Promise<CustomerAccountDisc
     apiConfig?.graphql_api?.trim() ||
     `https://shopify.com/${shopId}/account/customer/api/${apiVersion}/graphql`;
 
-  return {
-    openid,
-    graphqlUrl,
-  };
+  const value = { openid, graphqlUrl };
+  cached = { value, at: Date.now() };
+  return value;
 }

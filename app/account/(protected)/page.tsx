@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
 import { getCustomerProfile } from "@/lib/customer-account/api";
 
 export const instant = false;
@@ -7,7 +8,11 @@ export default async function AccountPage() {
   let profile;
   try {
     profile = await getCustomerProfile();
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
+    const detail =
+      error instanceof Error ? error.message : "Unknown account error";
+    console.error("[account]", detail);
     return (
       <main className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <h1 className="font-display text-3xl font-semibold text-ink">
@@ -15,6 +20,9 @@ export default async function AccountPage() {
         </h1>
         <p className="mt-4 text-steel">
           We couldn&apos;t load your account right now. Please try again.
+        </p>
+        <p className="mt-3 max-w-xl text-sm text-steel/80" role="status">
+          {detail}
         </p>
         <Link href="/account/logout" className="btn btn-secondary mt-8">
           Sign out

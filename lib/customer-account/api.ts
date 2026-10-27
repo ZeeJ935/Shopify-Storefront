@@ -1,6 +1,10 @@
+import { redirect, unstable_rethrow } from "next/navigation";
 import { getCustomerAccountDiscovery } from "./discovery";
-import { refreshCustomerSession } from "./oauth";
-import { getCustomerSession, type CustomerSession } from "./session";
+import {
+  getCustomerSession,
+  isSessionExpiringSoon,
+  type CustomerSession,
+} from "./session";
 
 export type CustomerProfile = {
   id: string;
@@ -56,61 +60,69 @@ export type CustomerOrderDetail = CustomerOrderSummary & {
   }[];
 };
 
-async function ensureFreshSession(): Promise<CustomerSession> {
+async function requireAccessToken(returnTo: string): Promise<CustomerSession> {
   const session = await getCustomerSession();
   if (!session) {
-    throw new Error("UNAUTHORIZED");
+    redirect("/account/authorize");
   }
 
-  if (session.expiresAt > Date.now() + 60_000) {
-    return session;
+  if (isSessionExpiringSoon(session)) {
+    redirect(
+      `/account/refresh?return_to=${encodeURIComponent(returnTo)}`,
+    );
   }
 
-  try {
-    return await refreshCustomerSession(session.refreshToken, session);
-  } catch {
-    throw new Error("UNAUTHORIZED");
-  }
+  return session;
 }
 
 export async function customerAccountFetch<T>(
   query: string,
   variables: Record<string, unknown> = {},
+  options?: { returnTo?: string },
 ): Promise<T> {
-  const session = await ensureFreshSession();
+  const returnTo = options?.returnTo ?? "/account";
+  const session = await requireAccessToken(returnTo);
   const { graphqlUrl } = await getCustomerAccountDiscovery();
 
-  const run = async (accessToken: string) => {
-    const response = await fetch(graphqlUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
-      cache: "no-store",
-    });
-    return response;
-  };
-
-  let response = await run(session.accessToken);
+  const response = await fetch(graphqlUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: session.accessToken,
+    },
+    body: JSON.stringify({ query, variables }),
+    cache: "no-store",
+  });
 
   if (response.status === 401) {
-    const refreshed = await refreshCustomerSession(
-      session.refreshToken,
-      session,
+    redirect(
+      `/account/refresh?return_to=${encodeURIComponent(returnTo)}`,
     );
-    response = await run(refreshed.accessToken);
   }
 
-  if (!response.ok) {
-    throw new Error(`Customer Account API failed: ${response.status}`);
-  }
-
-  const result = (await response.json()) as {
+  const raw = await response.text();
+  let result: {
     data?: T;
     errors?: { message: string }[];
   };
+
+  try {
+    result = JSON.parse(raw) as typeof result;
+  } catch {
+    throw new Error(
+      `Customer Account API returned non-JSON (${response.status}).`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Customer Account API failed: ${response.status}${
+        result.errors?.length
+          ? ` — ${result.errors.map((e) => e.message).join(", ")}`
+          : ""
+      }`,
+    );
+  }
 
   if (result.errors?.length) {
     throw new Error(result.errors.map((e) => e.message).join(", "));
@@ -133,7 +145,8 @@ export async function getCustomerProfile(): Promise<CustomerProfile> {
         lastName: string | null;
         emailAddress: { emailAddress: string } | null;
       };
-    }>(`
+    }>(
+      `
       query CustomerProfile {
         customer {
           id
@@ -145,7 +158,10 @@ export async function getCustomerProfile(): Promise<CustomerProfile> {
           }
         }
       }
-    `);
+    `,
+      {},
+      { returnTo: "/account" },
+    );
 
     return {
       id: data.customer.id,
@@ -154,8 +170,9 @@ export async function getCustomerProfile(): Promise<CustomerProfile> {
       lastName: data.customer.lastName,
       email: data.customer.emailAddress?.emailAddress ?? null,
     };
-  } catch {
-    // emailAddress can fail without Protected Customer Data approval
+  } catch (error) {
+    unstable_rethrow(error);
+
     const data = await customerAccountFetch<{
       customer: {
         id: string;
@@ -163,7 +180,8 @@ export async function getCustomerProfile(): Promise<CustomerProfile> {
         firstName: string | null;
         lastName: string | null;
       };
-    }>(`
+    }>(
+      `
       query CustomerProfileBasic {
         customer {
           id
@@ -172,7 +190,10 @@ export async function getCustomerProfile(): Promise<CustomerProfile> {
           lastName
         }
       }
-    `);
+    `,
+      {},
+      { returnTo: "/account" },
+    );
 
     return {
       id: data.customer.id,
@@ -203,7 +224,8 @@ export async function getCustomerAddresses(): Promise<CustomerAddress[]> {
         }[];
       };
     };
-  }>(`
+  }>(
+    `
     query CustomerAddresses {
       customer {
         addresses(first: 20) {
@@ -223,7 +245,10 @@ export async function getCustomerAddresses(): Promise<CustomerAddress[]> {
         }
       }
     }
-  `);
+  `,
+    {},
+    { returnTo: "/account/addresses" },
+  );
 
   return data.customer.addresses.nodes.map((address) => ({
     id: address.id,
@@ -289,6 +314,7 @@ export async function getCustomerOrders(options?: {
     }
   `,
     { first, after: options?.after ?? null },
+    { returnTo: "/account/orders" },
   );
 
   return {
@@ -396,6 +422,7 @@ export async function getCustomerOrderById(
       }
     `,
       { id },
+      { returnTo: `/account/orders/${encodeURIComponent(id)}` },
     );
 
     if (!data.order) return null;
@@ -442,7 +469,8 @@ export async function getCustomerOrderById(
         }));
       }),
     };
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return null;
   }
 }
