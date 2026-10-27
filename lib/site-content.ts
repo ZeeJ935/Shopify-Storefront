@@ -22,9 +22,8 @@ export type AnnouncementMessage = {
 export const announcementMessages: AnnouncementMessage[] = [
   {
     id: "shipping",
-    text: "Free shipping on orders over $75 — demo placeholder",
+    text: "Free shipping on orders over $75",
     href: "/collections/all",
-    demo: true,
   },
   {
     id: "sale",
@@ -33,14 +32,12 @@ export const announcementMessages: AnnouncementMessage[] = [
   },
   {
     id: "new",
-    text: "New arrivals drop weekly — demo placeholder",
+    text: "New arrivals drop weekly",
     href: "/collections/all?sort=latest",
-    demo: true,
   },
   {
     id: "student",
-    text: "Student discount available at checkout — demo placeholder",
-    demo: true,
+    text: "Student discount available at checkout",
   },
 ];
 

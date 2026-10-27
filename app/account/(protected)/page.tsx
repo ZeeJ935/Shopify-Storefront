@@ -1,106 +1,141 @@
 import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
-import LogoutButton from "@/app/components/logout-button";
-import { getCustomerProfile } from "@/lib/customer-account/api";
+import OrderCard from "@/app/account/components/order-card";
+import {
+  getCustomerAddresses,
+  getCustomerOrders,
+  getCustomerProfile,
+} from "@/lib/customer-account/api";
 
 export const instant = false;
 
 export default async function AccountPage() {
   let profile;
+  let orders: Awaited<ReturnType<typeof getCustomerOrders>>["orders"] = [];
+  let defaultAddress: Awaited<
+    ReturnType<typeof getCustomerAddresses>
+  >[number] | null = null;
+  let loadError: string | null = null;
+
   try {
-    profile = await getCustomerProfile();
+    const [p, orderResult, addresses] = await Promise.all([
+      getCustomerProfile(),
+      getCustomerOrders({ first: 3 }),
+      getCustomerAddresses().catch(() => []),
+    ]);
+    profile = p;
+    orders = orderResult.orders;
+    defaultAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
   } catch (error) {
     unstable_rethrow(error);
-    const detail =
-      error instanceof Error ? error.message : "Unknown account error";
-    console.error("[account]", detail);
+    loadError =
+      error instanceof Error ? error.message : "Could not load account.";
+  }
+
+  if (loadError || !profile) {
     return (
-      <main className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-        <h1 className="font-display text-3xl font-semibold text-ink">
-          My Account
-        </h1>
-        <p className="mt-4 text-steel">
-          We couldn&apos;t load your account right now. Please try again.
+      <div className="rounded-xl border border-mist bg-snow p-6 shadow-sm">
+        <h2 className="font-display text-xl font-semibold text-ink">
+          Something went wrong
+        </h2>
+        <p className="mt-2 text-sm text-steel">
+          {loadError ?? "We couldn’t load your account right now."}
         </p>
-        <p className="mt-3 max-w-xl text-sm text-steel/80" role="status">
-          {detail}
-        </p>
-        <LogoutButton className="btn btn-secondary mt-8">Sign out</LogoutButton>
-      </main>
+      </div>
     );
   }
 
-  const name = profile.firstName || profile.displayName || "there";
-
   return (
-    <main className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-      <div className="border-b border-mist pb-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-steel">
-          Account
-        </p>
-        <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
-          My Account
-        </h1>
-        <p className="mt-3 text-base text-steel">Welcome back, {name}.</p>
-        {profile.email ? (
-          <p className="mt-1 text-sm text-steel">{profile.email}</p>
-        ) : null}
-      </div>
-
-      <ul className="mt-10 divide-y divide-mist border-y border-mist">
-        <li>
+    <div className="space-y-8">
+      <section className="space-y-4">
+        <div className="flex items-end justify-between gap-4">
+          <h2 className="font-display text-lg font-semibold uppercase tracking-wide text-ink">
+            Recent orders
+          </h2>
           <Link
             href="/account/orders"
-            className="flex items-center justify-between gap-4 py-6 transition-colors hover:bg-mist/30"
+            className="text-sm font-medium text-steel underline-offset-4 hover:text-ink hover:underline"
           >
-            <div>
-              <p className="font-display text-base font-semibold uppercase tracking-wide text-ink">
-                Orders
-              </p>
-              <p className="mt-1 text-sm text-steel">
-                View and track your purchases
-              </p>
-            </div>
-            <span aria-hidden="true" className="text-steel">
-              →
-            </span>
+            View all
           </Link>
-        </li>
-        <li>
+        </div>
+        {orders.length === 0 ? (
+          <div className="rounded-xl border border-mist bg-snow p-8 text-center shadow-sm">
+            <p className="font-display text-base font-semibold text-ink">
+              No orders yet
+            </p>
+            <p className="mt-2 text-sm text-steel">
+              When you place an order, it will show up here.
+            </p>
+            <Link href="/collections/all" className="btn btn-primary mt-6">
+              Start shopping
+            </Link>
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {orders.map((order) => (
+              <li key={order.id}>
+                <OrderCard order={order} compact />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-xl border border-mist bg-snow p-5 shadow-sm">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink">
+            Default address
+          </h2>
+          {defaultAddress ? (
+            <div className="mt-3 space-y-1 text-sm text-steel">
+              {defaultAddress.formatted.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-steel">No address saved yet.</p>
+          )}
           <Link
             href="/account/addresses"
-            className="flex items-center justify-between gap-4 py-6 transition-colors hover:bg-mist/30"
+            className="mt-4 inline-flex text-sm font-medium text-ink underline-offset-4 hover:underline"
           >
-            <div>
-              <p className="font-display text-base font-semibold uppercase tracking-wide text-ink">
-                Addresses
-              </p>
-              <p className="mt-1 text-sm text-steel">
-                Manage your saved addresses
-              </p>
-            </div>
-            <span aria-hidden="true" className="text-steel">
-              →
-            </span>
+            Manage addresses
           </Link>
-        </li>
-        <li>
-          <div className="py-6">
-            <p className="font-display text-base font-semibold uppercase tracking-wide text-ink">
-              Profile
-            </p>
-            <p className="mt-1 text-sm text-steel">
-              {[profile.firstName, profile.lastName].filter(Boolean).join(" ") ||
-                profile.displayName}
-              {profile.email ? ` · ${profile.email}` : ""}
-            </p>
-          </div>
-        </li>
-      </ul>
+        </div>
 
-      <LogoutButton className="mt-10 inline-flex min-h-11 items-center text-sm font-medium uppercase tracking-wide text-steel underline-offset-4 hover:text-ink hover:underline">
-        Sign out
-      </LogoutButton>
-    </main>
+        <div className="rounded-xl border border-mist bg-snow p-5 shadow-sm">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-ink">
+            Quick links
+          </h2>
+          <ul className="mt-3 space-y-2 text-sm">
+            <li>
+              <Link
+                href="/account/orders"
+                className="font-medium text-steel hover:text-ink hover:underline"
+              >
+                Order history
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/account/profile"
+                className="font-medium text-steel hover:text-ink hover:underline"
+              >
+                Edit profile
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/collections/all"
+                className="font-medium text-steel hover:text-ink hover:underline"
+              >
+                Continue shopping
+              </Link>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </div>
   );
 }

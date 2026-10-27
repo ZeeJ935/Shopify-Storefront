@@ -36,14 +36,7 @@ export default function AnnouncementBar({ messages }: AnnouncementBarProps) {
   if (messages.length === 0) return null;
 
   const current = messages[index] ?? messages[0];
-  const content = current.demo ? (
-    <span>
-      {current.text}
-      <span className="sr-only"> (demo placeholder)</span>
-    </span>
-  ) : (
-    current.text
-  );
+  const content = current.text;
 
   return (
     <div

@@ -1,23 +1,13 @@
 import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
+import OrderCard from "@/app/account/components/order-card";
 import { getCustomerOrders } from "@/lib/customer-account/api";
-import { formatMoney } from "@/lib/money";
 
 export const instant = false;
 
 type OrdersPageProps = {
   searchParams: Promise<{ after?: string }>;
 };
-
-function formatDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(date);
-}
 
 export default async function AccountOrdersPage({
   searchParams,
@@ -30,80 +20,46 @@ export default async function AccountOrdersPage({
     const result = await getCustomerOrders({ first: 10, after: after ?? null });
     orders = result.orders;
     pageInfo = result.pageInfo;
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return (
-      <main className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-        <Link
-          href="/account"
-          className="text-sm font-medium text-steel hover:text-ink hover:underline"
-        >
-          ← Account
-        </Link>
-        <h1 className="mt-6 font-display text-3xl font-semibold text-ink">
-          Orders
-        </h1>
-        <p className="mt-4 text-steel">
-          We couldn&apos;t load your orders. Please try again later.
+      <div className="rounded-xl border border-mist bg-snow p-6 shadow-sm">
+        <h2 className="font-display text-xl font-semibold text-ink">Orders</h2>
+        <p className="mt-2 text-sm text-steel">
+          We couldn’t load your orders. Please try again later.
         </p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-      <Link
-        href="/account"
-        className="text-sm font-medium text-steel hover:text-ink hover:underline"
-      >
-        ← Account
-      </Link>
-      <h1 className="mt-6 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
-        Orders
-      </h1>
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
+          Orders
+        </h2>
+        <p className="mt-1 text-sm text-steel">
+          Track purchases and view order details.
+        </p>
+      </div>
 
       {orders.length === 0 ? (
-        <div className="mt-12 max-w-lg border-y border-mist py-12">
-          <h2 className="font-display text-xl font-semibold text-ink">
+        <div className="rounded-xl border border-mist bg-snow px-6 py-14 text-center shadow-sm">
+          <h3 className="font-display text-xl font-semibold text-ink">
             No orders yet
-          </h2>
-          <p className="mt-3 text-steel">
+          </h3>
+          <p className="mt-2 text-sm text-steel">
             When you place an order, it will appear here.
           </p>
           <Link href="/collections/all" className="btn btn-primary mt-8">
-            Continue shopping
+            Start shopping
           </Link>
         </div>
       ) : (
-        <ul className="mt-10 divide-y divide-mist border-y border-mist">
+        <ul className="space-y-3">
           {orders.map((order) => (
             <li key={order.id}>
-              <Link
-                href={`/account/orders/${encodeURIComponent(order.id)}`}
-                className="grid gap-2 py-6 transition-colors hover:bg-mist/30 sm:grid-cols-[1fr_auto] sm:items-center"
-              >
-                <div>
-                  <p className="font-display text-base font-semibold text-ink">
-                    {order.name}
-                  </p>
-                  <p className="mt-1 text-sm text-steel">
-                    {formatDate(order.processedAt)}
-                    {order.financialStatus
-                      ? ` · ${order.financialStatus.replaceAll("_", " ")}`
-                      : ""}
-                    {order.fulfillmentStatus
-                      ? ` · ${order.fulfillmentStatus.replaceAll("_", " ")}`
-                      : ""}
-                  </p>
-                </div>
-                <p className="font-medium text-ink sm:text-right">
-                  {order.totalPrice
-                    ? formatMoney(
-                        order.totalPrice.amount,
-                        order.totalPrice.currencyCode,
-                      )
-                    : "—"}
-                </p>
-              </Link>
+              <OrderCard order={order} />
             </li>
           ))}
         </ul>
@@ -112,11 +68,11 @@ export default async function AccountOrdersPage({
       {pageInfo.hasNextPage && pageInfo.endCursor ? (
         <Link
           href={`/account/orders?after=${encodeURIComponent(pageInfo.endCursor)}`}
-          className="btn btn-secondary mt-8"
+          className="btn btn-secondary"
         >
           Load more
         </Link>
       ) : null}
-    </main>
+    </div>
   );
 }

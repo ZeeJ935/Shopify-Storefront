@@ -67,10 +67,11 @@ function testCheckoutUrl() {
 }
 
 function testMoney() {
+  assert.match(formatMoney("19.99", "USD"), /USD/);
   assert.match(formatMoney("19.99", "USD"), /19\.99|19,99/);
   assert.equal(formatMoney("nope", "USD"), "nope");
   assert.equal(formatMoney("10", ""), "10");
-  assert.equal(formatMoney("12.5", "NOTREAL"), "12.5 NOTREAL");
+  assert.equal(formatMoney("12.5", "NOTREAL"), "NOTREAL 12.5");
 }
 
 function testSalePercent() {

@@ -10,12 +10,13 @@ export function formatMoney(amount: string, currencyCode: string) {
   }
 
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: currencyCode,
+      currencyDisplay: "code",
     }).format(value);
   } catch {
-    return `${amount} ${currencyCode}`;
+    return `${currencyCode} ${amount}`;
   }
 }
 
