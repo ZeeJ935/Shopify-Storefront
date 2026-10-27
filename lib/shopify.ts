@@ -29,6 +29,8 @@ export async function shopifyFetch<T>(
   const useRevalidate =
     typeof options.revalidate === "number" && options.revalidate >= 0;
 
+  // AbortSignal only on uncached cart/session fetches — attaching it to
+  // revalidated catalog fetches can opt them out of the static cache shell.
   let response: Response;
   try {
     response = await fetch(
@@ -40,10 +42,12 @@ export async function shopifyFetch<T>(
           "X-Shopify-Storefront-Access-Token": storefrontToken,
         },
         body: JSON.stringify({ query, variables }),
-        signal: AbortSignal.timeout(20_000),
         ...(useRevalidate
           ? { next: { revalidate: options.revalidate } }
-          : { cache: "no-store" as const }),
+          : {
+              cache: "no-store" as const,
+              signal: AbortSignal.timeout(20_000),
+            }),
       },
     );
   } catch (error) {

@@ -6,13 +6,27 @@ import SiteFooter from "./site-footer";
 import SiteHeader from "./site-header";
 import SiteHeaderFallback from "./site-header-fallback";
 
-export default async function SiteShell({
+async function SiteFooterFromCatalog() {
+  const catalog = await getNavCatalog();
+
+  return (
+    <SiteFooter
+      shopName={siteBrand.name}
+      navLinks={catalog.links}
+      brandTiles={catalog.brandTiles}
+    />
+  );
+}
+
+/**
+ * Root chrome must stay prerenderable for `/_not-found`.
+ * Request/cookie data (header cart) and catalog fetches stay inside Suspense.
+ */
+export default function SiteShell({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const catalog = await getNavCatalog();
-
   return (
     <>
       <a
@@ -28,11 +42,9 @@ export default async function SiteShell({
       <div id="main-content" className="flex-1">
         {children}
       </div>
-      <SiteFooter
-        shopName={siteBrand.name}
-        navLinks={catalog.links}
-        brandTiles={catalog.brandTiles}
-      />
+      <Suspense fallback={<SiteFooter shopName={siteBrand.name} />}>
+        <SiteFooterFromCatalog />
+      </Suspense>
     </>
   );
 }

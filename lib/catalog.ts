@@ -1,3 +1,4 @@
+import { cacheLife } from "next/cache";
 import { CATALOG_REVALIDATE, shopifyFetch } from "./shopify";
 import { getCatalogSnapshot } from "./catalog-snapshot";
 import {
@@ -288,6 +289,9 @@ export type NavCatalog = {
 };
 
 export async function getNavCatalog(): Promise<NavCatalog> {
+  "use cache";
+  cacheLife("minutes");
+
   try {
     const [collections, typeProbe, snapshot] = await Promise.all([
       probeCollections(),
