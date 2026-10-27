@@ -43,7 +43,7 @@ export default function CheckoutButton({
       >
         <PendingButtonLabel
           pending={redirecting}
-          idleLabel="Checkout"
+          idleLabel="Proceed to Checkout"
           pendingLabel="Redirecting…"
         />
       </button>

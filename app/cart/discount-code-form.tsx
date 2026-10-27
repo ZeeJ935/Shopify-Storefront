@@ -76,12 +76,12 @@ export default function DiscountCodeForm({
   }
 
   return (
-    <div className="mt-5 space-y-3 border-t border-mist pt-5">
+    <div className="mt-6 space-y-3 border-t border-mist pt-6">
       <label
         htmlFor="discount-code"
-        className="block text-sm font-medium text-ink"
+        className="block text-xs font-semibold uppercase tracking-[0.12em] text-ink"
       >
-        Discount code
+        Promo code
       </label>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <input
@@ -105,14 +105,14 @@ export default function DiscountCodeForm({
               handleApply();
             }
           }}
-          className="min-h-11 w-full flex-1 rounded border border-mist bg-snow px-3 text-sm text-ink placeholder:text-steel disabled:cursor-not-allowed disabled:opacity-50"
+          className="field min-h-11 w-full flex-1 rounded-none bg-snow px-3 text-sm"
         />
         <button
           type="button"
           onClick={handleApply}
           disabled={isPending || value.trim().length === 0}
           aria-busy={isPending && removingCode === null}
-          className="btn btn-secondary min-h-11 min-w-[7.5rem] shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn btn-secondary min-h-11 min-w-[7.5rem] shrink-0 rounded-none disabled:cursor-not-allowed disabled:opacity-50"
         >
           <PendingButtonLabel
             pending={showPending && removingCode === null}
@@ -140,7 +140,7 @@ export default function DiscountCodeForm({
                   disabled={isPending}
                   aria-busy={chipPending}
                   aria-label={`Remove discount code ${item.code}`}
-                  className="inline-flex min-h-11 items-center gap-2 rounded border border-mist bg-snow px-3 text-sm font-medium text-ink hover:border-steel disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center gap-2 border border-mist bg-snow px-3 text-sm font-medium uppercase tracking-wide text-ink hover:border-steel disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span>{item.code}</span>
                   {chipPending ? (

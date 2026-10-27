@@ -6,12 +6,7 @@ import ProductCard from "./components/product-card";
 import { getNavCatalog } from "@/lib/catalog";
 import { getCollectionProductsPreview } from "@/lib/collections";
 import { getProducts } from "@/lib/products";
-import {
-  brandBenefits,
-  editorialGuides,
-  heroSlides,
-  siteBrand,
-} from "@/lib/site-content";
+import { brandBenefits, heroSlides, siteBrand } from "@/lib/site-content";
 
 export const instant = false;
 
@@ -43,10 +38,6 @@ export default async function Home() {
 
   const menCta = catalog.collections.has("men");
   const womenCta = catalog.collections.has("women");
-
-  const guides = editorialGuides.filter((g) =>
-    catalog.collections.has(g.collectionHandle),
-  );
 
   return (
     <main>
@@ -253,45 +244,6 @@ export default async function Home() {
           ))}
         </div>
       </section>
-
-      {/* Editorial guides */}
-      {guides.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-          <h2 className="display-section mb-8 text-ink">Shop the look</h2>
-          <div className="grid gap-6 md:grid-cols-3">
-            {guides.map((guide) => {
-              const col = catalog.collections.get(guide.collectionHandle);
-              const img =
-                col?.image ??
-                col?.products.edges[0]?.node.featuredImage ??
-                null;
-              return (
-                <Link
-                  key={guide.id}
-                  href={`/collections/${guide.collectionHandle}`}
-                  className="group block"
-                >
-                  <div className="relative aspect-[16/10] overflow-hidden bg-mist">
-                    {img && (
-                      <Image
-                        src={img.url}
-                        alt={img.altText ?? guide.title}
-                        fill
-                        sizes="(max-width: 768px) 100vw, 33vw"
-                        className="object-cover transition duration-500 group-hover:scale-[1.03]"
-                      />
-                    )}
-                  </div>
-                  <h3 className="mt-4 font-display text-lg font-bold uppercase tracking-wide text-ink group-hover:underline">
-                    {guide.title}
-                  </h3>
-                  <p className="mt-1 text-sm text-steel">{guide.description}</p>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      )}
     </main>
   );
 }

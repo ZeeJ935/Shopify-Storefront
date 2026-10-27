@@ -154,9 +154,9 @@ export default function CartLineControls({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-4">
         <div
-          className="inline-flex items-center rounded border border-mist bg-white"
+          className="inline-flex items-center border border-mist bg-snow"
           role="group"
           aria-label={`Quantity for ${productTitle}`}
           aria-busy={isPending}
@@ -166,7 +166,7 @@ export default function CartLineControls({
             onClick={handleDecrease}
             disabled={isPending || displayQuantity <= 1}
             aria-label={`Decrease quantity of ${productTitle}`}
-            className="inline-flex h-11 w-11 items-center justify-center text-lg text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-11 w-11 items-center justify-center text-base text-ink transition-colors hover:bg-mist/60 disabled:cursor-not-allowed disabled:opacity-40"
           >
             −
           </button>
@@ -185,14 +185,14 @@ export default function CartLineControls({
                 event.currentTarget.blur();
               }
             }}
-            className="h-11 w-12 border-x border-mist bg-transparent text-center text-sm text-ink [appearance:textfield] disabled:opacity-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            className="h-11 w-12 border-x border-mist bg-transparent text-center text-sm font-medium text-ink [appearance:textfield] disabled:opacity-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
           <button
             type="button"
             onClick={handleIncrease}
             disabled={isPending || displayQuantity >= 99}
             aria-label={`Increase quantity of ${productTitle}`}
-            className="inline-flex h-11 w-11 items-center justify-center text-lg text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-11 w-11 items-center justify-center text-base text-ink transition-colors hover:bg-mist/60 disabled:cursor-not-allowed disabled:opacity-40"
           >
             +
           </button>
@@ -207,7 +207,7 @@ export default function CartLineControls({
           onClick={handleRemove}
           disabled={isPending}
           aria-busy={isPending}
-          className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-steel underline-offset-2 hover:text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-11 items-center text-sm font-medium uppercase tracking-wide text-steel underline-offset-4 transition-colors hover:text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-50"
         >
           Remove
         </button>

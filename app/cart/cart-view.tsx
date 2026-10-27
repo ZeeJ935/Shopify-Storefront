@@ -3,7 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
+import ProductCard from "@/app/components/product-card";
 import { formatMoney } from "@/lib/money";
+import type { ProductListItem } from "@/lib/products";
 import CartLineControls from "./cart-line-controls";
 import CheckoutButton from "./checkout-button";
 import DiscountCodeForm from "./discount-code-form";
@@ -65,6 +67,7 @@ type CartViewProps = {
     lines: CartViewLine[];
   };
   checkoutAllowedHosts?: string[];
+  recommendations?: ProductListItem[];
 };
 
 function discountLabel(application: DiscountApplication) {
@@ -82,6 +85,7 @@ function allocationLabel(allocation: DiscountAllocation) {
 export default function CartView({
   cart,
   checkoutAllowedHosts = [],
+  recommendations = [],
 }: CartViewProps) {
   const [quantityOverrides, setQuantityOverrides] = useState<
     Record<string, number>
@@ -133,25 +137,25 @@ export default function CartView({
   const summaryPending = pendingLineIds.length > 0 || discountPending;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-8 sm:py-14">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+    <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8 lg:py-16">
+      <div className="mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-mist pb-6">
         <div>
-          <h1 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
-            Your cart
+          <h1 className="font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+            Your Bag
           </h1>
-          <p className="mt-2 text-sm text-steel">
+          <p className="mt-2 text-sm uppercase tracking-[0.12em] text-steel">
             {totalQuantity} item{totalQuantity === 1 ? "" : "s"}
           </p>
         </div>
         <Link
-          href="/#catalog"
-          className="inline-flex min-h-11 items-center text-sm font-medium text-steel hover:text-ink hover:underline"
+          href="/collections/all"
+          className="inline-flex min-h-11 items-center text-sm font-medium text-steel underline-offset-4 hover:text-ink hover:underline"
         >
-          ← Continue shopping
+          Continue shopping
         </Link>
       </div>
 
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)] lg:items-start lg:gap-12">
+      <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-16">
         <ul className="divide-y divide-mist border-y border-mist">
           {displayLines.map((line) => {
             const serverLine =
@@ -162,19 +166,27 @@ export default function CartView({
               serverLine.cost.subtotalAmount.amount !==
               serverLine.cost.totalAmount.amount;
             const compareAt = serverLine.cost.compareAtAmountPerQuantity;
+            const showCompareAt =
+              compareAt !== null &&
+              Number(compareAt.amount) >
+                Number(serverLine.cost.amountPerQuantity.amount);
             const allocationNote = serverLine.discountAllocations
               .map(allocationLabel)
               .find(Boolean);
             const linePending = pendingLineIds.includes(line.id);
+            const productHref = `/products/${line.merchandise.product.handle}`;
 
             return (
               <li
                 key={line.id}
-                className={`grid grid-cols-[5.5rem_minmax(0,1fr)] gap-4 py-6 transition-opacity sm:grid-cols-[6.5rem_minmax(0,1fr)_auto] sm:gap-6 ${
+                className={`grid grid-cols-[7rem_minmax(0,1fr)] gap-4 py-8 transition-opacity sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:gap-8 ${
                   linePending ? "opacity-60" : "opacity-100"
                 }`}
               >
-                <div className="relative aspect-square overflow-hidden rounded bg-mist">
+                <Link
+                  href={productHref}
+                  className="relative aspect-[4/5] overflow-hidden bg-mist"
+                >
                   {line.merchandise.image ? (
                     <Image
                       src={line.merchandise.image.url}
@@ -183,7 +195,7 @@ export default function CartView({
                         line.merchandise.product.title
                       }
                       fill
-                      sizes="104px"
+                      sizes="128px"
                       className="object-cover"
                     />
                   ) : (
@@ -194,53 +206,51 @@ export default function CartView({
                       No image
                     </div>
                   )}
-                </div>
+                </Link>
 
-                <div className="min-w-0 space-y-3">
+                <div className="min-w-0 space-y-4">
                   <div>
                     <Link
-                      href={`/products/${line.merchandise.product.handle}`}
-                      className="font-display text-base font-semibold text-ink hover:underline sm:text-lg"
+                      href={productHref}
+                      className="font-display text-base font-semibold uppercase tracking-wide text-ink hover:underline sm:text-lg"
                     >
                       {line.merchandise.product.title}
                     </Link>
-                    {showVariant && (
-                      <p className="mt-1 text-sm text-steel">
+                    {showVariant ? (
+                      <p className="mt-1.5 text-sm text-steel">
                         {line.merchandise.title}
                       </p>
-                    )}
-                    <p className="mt-2 text-sm text-steel">
-                      {compareAt &&
-                      compareAt.amount !==
-                        serverLine.cost.amountPerQuantity.amount ? (
+                    ) : null}
+                    <p className="mt-3 text-sm text-ink">
+                      {showCompareAt && compareAt ? (
                         <>
-                          <span className="mr-2 line-through">
+                          <span className="mr-2 text-steel line-through">
                             {formatMoney(
                               compareAt.amount,
                               compareAt.currencyCode,
                             )}
                           </span>
-                          {formatMoney(
-                            serverLine.cost.amountPerQuantity.amount,
-                            serverLine.cost.amountPerQuantity.currencyCode,
-                          )}{" "}
-                          each
+                          <span className="font-medium text-sale">
+                            {formatMoney(
+                              serverLine.cost.amountPerQuantity.amount,
+                              serverLine.cost.amountPerQuantity.currencyCode,
+                            )}
+                          </span>
                         </>
                       ) : (
-                        <>
+                        <span className="font-medium">
                           {formatMoney(
                             serverLine.cost.amountPerQuantity.amount,
                             serverLine.cost.amountPerQuantity.currencyCode,
-                          )}{" "}
-                          each
-                        </>
+                          )}
+                        </span>
                       )}
                     </p>
-                    {allocationNote && (
+                    {allocationNote ? (
                       <p className="mt-1 text-xs text-steel">
                         Includes {allocationNote}
                       </p>
-                    )}
+                    ) : null}
                   </div>
 
                   <CartLineControls
@@ -279,7 +289,7 @@ export default function CartView({
 
                 <div className="col-span-2 text-right sm:col-span-1 sm:pt-1">
                   {hasLineDiscount ? (
-                    <p className="font-medium text-ink">
+                    <p className="font-display text-base font-semibold text-ink">
                       <span className="mr-2 text-sm font-normal text-steel line-through">
                         {formatMoney(
                           serverLine.cost.subtotalAmount.amount,
@@ -292,7 +302,7 @@ export default function CartView({
                       )}
                     </p>
                   ) : (
-                    <p className="font-medium text-ink">
+                    <p className="font-display text-base font-semibold text-ink">
                       {formatMoney(
                         serverLine.cost.totalAmount.amount,
                         serverLine.cost.totalAmount.currencyCode,
@@ -305,13 +315,13 @@ export default function CartView({
           })}
         </ul>
 
-        <aside className="rounded border border-mist bg-white p-5 lg:sticky lg:top-24">
-          <h2 className="font-display text-lg font-semibold text-ink">
-            Order summary
+        <aside className="border-t border-mist pt-8 lg:sticky lg:top-28 lg:border-t-0 lg:bg-mist/35 lg:px-6 lg:py-7 lg:pt-7">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-[0.14em] text-ink">
+            Summary
           </h2>
 
           <div
-            className={`mt-5 space-y-3 text-sm transition-opacity ${
+            className={`mt-6 space-y-3 text-sm transition-opacity ${
               summaryPending ? "opacity-60" : "opacity-100"
             }`}
           >
@@ -343,9 +353,11 @@ export default function CartView({
               </div>
             ))}
 
-            <div className="flex items-center justify-between gap-4 border-t border-mist pt-3">
-              <span className="font-medium text-ink">Estimated total</span>
-              <span className="font-semibold text-ink">
+            <div className="flex items-center justify-between gap-4 border-t border-mist pt-4">
+              <span className="font-display text-base font-semibold text-ink">
+                Estimated total
+              </span>
+              <span className="font-display text-base font-semibold text-ink">
                 {formatMoney(
                   cart.cost.totalAmount.amount,
                   cart.cost.totalAmount.currencyCode,
@@ -354,20 +366,45 @@ export default function CartView({
             </div>
           </div>
 
+          <p className="mt-3 text-xs leading-relaxed text-steel">
+            Shipping and taxes calculated at checkout.
+          </p>
+
           <DiscountCodeForm
             discountCodes={cart.discountCodes}
             onPendingChange={setDiscountPending}
           />
 
-          <p className="mt-4 text-sm text-steel">
-            Shipping and taxes calculated at checkout.
-          </p>
           <CheckoutButton
             checkoutUrl={cart.checkoutUrl}
             allowedHost={checkoutAllowedHosts}
           />
+
+          <Link
+            href="/collections/all"
+            className="mt-4 flex min-h-11 items-center justify-center text-sm font-medium text-steel underline-offset-4 hover:text-ink hover:underline"
+          >
+            Continue shopping
+          </Link>
+
+          <p className="mt-6 text-center text-xs text-steel">
+            Secure checkout via Shopify
+          </p>
         </aside>
       </div>
+
+      {recommendations.length > 0 ? (
+        <section className="mt-16 border-t border-mist pt-12 sm:mt-20 sm:pt-16">
+          <h2 className="font-display text-xl font-semibold uppercase tracking-wide text-ink sm:text-2xl">
+            You may also like
+          </h2>
+          <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4 lg:gap-6">
+            {recommendations.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

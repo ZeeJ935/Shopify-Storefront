@@ -196,8 +196,8 @@ export default function SiteHeaderShell({
   return (
     <>
       <header
-        className={`sticky top-0 z-50 border-b border-mist bg-snow/95 backdrop-blur-sm transition-shadow ${
-          scrolled ? "shadow-sm" : ""
+        className={`sticky top-0 z-50 border-b border-white/50 bg-snow/55 shadow-[0_1px_0_rgba(11,18,32,0.04)] backdrop-blur-xl backdrop-saturate-150 transition-[background-color,box-shadow] supports-[backdrop-filter]:bg-snow/40 ${
+          scrolled ? "bg-snow/70 shadow-sm supports-[backdrop-filter]:bg-snow/55" : ""
         }`}
       >
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
@@ -289,7 +289,7 @@ export default function SiteHeaderShell({
             id={`${megaId}-${activeMega.id}`}
             role="region"
             aria-label={`${activeMega.label} menu`}
-            className="absolute inset-x-0 top-full z-50 hidden border-b border-mist bg-snow shadow-md lg:block"
+            className="absolute inset-x-0 top-full z-50 hidden border-b border-white/40 bg-snow/75 shadow-md backdrop-blur-xl supports-[backdrop-filter]:bg-snow/60 lg:block"
             onMouseEnter={clearTimers}
             onMouseLeave={scheduleClose}
           >
