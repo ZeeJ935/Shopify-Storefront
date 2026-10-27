@@ -16,6 +16,7 @@ import type {
   ResolvedNavLink,
 } from "@/lib/catalog";
 import { siteBrand } from "@/lib/site-content";
+import LogoutButton from "./logout-button";
 import SearchDrawer from "./search-drawer";
 
 type SiteHeaderShellProps = {
@@ -297,12 +298,9 @@ export default function SiteHeaderShell({
                       >
                         Orders
                       </Link>
-                      <Link
-                        href="/account/logout"
-                        className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
-                      >
+                      <LogoutButton className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-mist/50">
                         Log out
-                      </Link>
+                      </LogoutButton>
                     </>
                   ) : (
                     <Link
@@ -702,13 +700,9 @@ export default function SiteHeaderShell({
                   >
                     Orders
                   </Link>
-                  <Link
-                    href="/account/logout"
-                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
-                    onClick={() => setMobileOpen(false)}
-                  >
+                  <LogoutButton className="flex min-h-11 w-full items-center px-1 text-left text-sm font-semibold uppercase tracking-wide">
                     Log out
-                  </Link>
+                  </LogoutButton>
                 </>
               ) : (
                 <Link

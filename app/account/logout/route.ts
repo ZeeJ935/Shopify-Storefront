@@ -6,7 +6,11 @@ import {
   getCustomerSession,
 } from "@/lib/customer-account/session";
 
-export async function GET(request: Request) {
+/**
+ * Logout must be POST-only. Next.js <Link> prefetches GET routes, which was
+ * wiping session cookies whenever Account UI appeared in the viewport.
+ */
+export async function POST(request: Request) {
   await connection();
   const session = await getCustomerSession();
 
@@ -17,11 +21,13 @@ export async function GET(request: Request) {
     console.error("[account/logout]", error);
   }
 
-  const response = NextResponse.redirect(logoutUrl, 302);
+  const response = NextResponse.redirect(logoutUrl, 303);
   clearCustomerSessionCookies(response);
   return response;
 }
 
-export async function POST(request: Request) {
-  return GET(request);
+export async function GET(request: Request) {
+  await connection();
+  // Do not clear cookies on GET (prefetch-safe).
+  return NextResponse.redirect(new URL("/account", request.url), 302);
 }

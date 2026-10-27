@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { unstable_rethrow } from "next/navigation";
+import LogoutButton from "@/app/components/logout-button";
 import { getCustomerProfile } from "@/lib/customer-account/api";
 
 export const instant = false;
@@ -24,9 +25,7 @@ export default async function AccountPage() {
         <p className="mt-3 max-w-xl text-sm text-steel/80" role="status">
           {detail}
         </p>
-        <Link href="/account/logout" className="btn btn-secondary mt-8">
-          Sign out
-        </Link>
+        <LogoutButton className="btn btn-secondary mt-8">Sign out</LogoutButton>
       </main>
     );
   }
@@ -99,12 +98,9 @@ export default async function AccountPage() {
         </li>
       </ul>
 
-      <Link
-        href="/account/logout"
-        className="mt-10 inline-flex min-h-11 items-center text-sm font-medium uppercase tracking-wide text-steel underline-offset-4 hover:text-ink hover:underline"
-      >
+      <LogoutButton className="mt-10 inline-flex min-h-11 items-center text-sm font-medium uppercase tracking-wide text-steel underline-offset-4 hover:text-ink hover:underline">
         Sign out
-      </Link>
+      </LogoutButton>
     </main>
   );
 }
