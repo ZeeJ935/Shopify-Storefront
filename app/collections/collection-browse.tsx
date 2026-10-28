@@ -298,7 +298,7 @@ export default function CollectionBrowse({
             No products match these filters.
           </p>
         ) : (
-          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4 lg:gap-6">
+          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
             {products.map((product) => (
               <div key={product.id} className="min-w-0">
                 <ProductCard product={product} />
@@ -308,7 +308,7 @@ export default function CollectionBrowse({
         )}
 
         {loadingMore && (
-          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4 lg:gap-6">
+          <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton
                 key={i}

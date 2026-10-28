@@ -7,13 +7,17 @@ import ProductCard from "./product-card";
 type ProductCarouselProps = {
   products: ProductListItem[];
   label: string;
+  /** Dark band (e.g. sale strip) — light arrows + inverted card text. */
+  tone?: "light" | "dark";
 };
 
 export default function ProductCarousel({
   products,
   label,
+  tone = "light",
 }: ProductCarouselProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const dark = tone === "dark";
 
   function scrollBy(dir: -1 | 1) {
     const el = scrollerRef.current;
@@ -25,11 +29,21 @@ export default function ProductCarousel({
   if (products.length === 0) return null;
 
   return (
-    <div className="relative">
+    <div
+      className={`relative ${
+        dark
+          ? "[&_h3]:text-snow [&_p]:text-mist [&_.text-ink]:text-snow [&_.text-steel]:text-mist [&_button]:text-snow [&_a]:text-snow"
+          : ""
+      }`}
+    >
       <div className="mb-4 flex items-center justify-end gap-2">
         <button
           type="button"
-          className="hidden h-11 w-11 items-center justify-center border border-mist text-ink hover:border-ink md:inline-flex"
+          className={`hidden h-11 w-11 items-center justify-center md:inline-flex ${
+            dark
+              ? "border border-snow/40 text-snow hover:border-snow"
+              : "border border-mist text-ink hover:border-ink"
+          }`}
           aria-label={`Previous ${label}`}
           onClick={() => scrollBy(-1)}
         >
@@ -37,7 +51,11 @@ export default function ProductCarousel({
         </button>
         <button
           type="button"
-          className="hidden h-11 w-11 items-center justify-center border border-mist text-ink hover:border-ink md:inline-flex"
+          className={`hidden h-11 w-11 items-center justify-center md:inline-flex ${
+            dark
+              ? "border border-snow/40 text-snow hover:border-snow"
+              : "border border-mist text-ink hover:border-ink"
+          }`}
           aria-label={`Next ${label}`}
           onClick={() => scrollBy(1)}
         >
@@ -54,7 +72,7 @@ export default function ProductCarousel({
           <div
             key={product.id}
             role="listitem"
-            className="w-[calc(50%-0.5rem)] min-w-0 shrink-0 snap-start md:w-[calc(25%-0.75rem)]"
+            className="w-[calc((100%-1rem)/2)] min-w-0 shrink-0 snap-start sm:w-[calc((100%-2rem)/3)] lg:w-[calc((100%-3rem)/4)]"
           >
             <ProductCard product={product} />
           </div>

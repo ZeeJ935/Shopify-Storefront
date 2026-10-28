@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AnnouncementMessage } from "@/lib/site-content";
+import SiteContainer from "./site-container";
 
 type AnnouncementBarProps = {
   messages: AnnouncementMessage[];
@@ -51,7 +52,7 @@ export default function AnnouncementBar({ messages }: AnnouncementBarProps) {
         }
       }}
     >
-      <div className="mx-auto flex max-w-7xl items-center gap-2 px-2 py-2 sm:px-4">
+      <SiteContainer className="flex items-center gap-2 py-2">
         {messages.length > 1 && (
           <button
             type="button"
@@ -93,7 +94,7 @@ export default function AnnouncementBar({ messages }: AnnouncementBarProps) {
             <span aria-hidden="true">›</span>
           </button>
         )}
-      </div>
+      </SiteContainer>
     </div>
   );
 }

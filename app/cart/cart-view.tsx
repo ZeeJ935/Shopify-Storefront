@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import ProductCard from "@/app/components/product-card";
+import SiteContainer from "@/app/components/site-container";
 import { formatMoney } from "@/lib/money";
 import type { ProductListItem } from "@/lib/products";
 import CartLineControls from "./cart-line-controls";
@@ -137,7 +138,7 @@ export default function CartView({
   const summaryPending = pendingLineIds.length > 0 || discountPending;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8 lg:py-16">
+    <SiteContainer boxed className="py-10 sm:py-14 lg:py-16">
       <div className="mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-mist pb-6">
         <div>
           <h1 className="font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
@@ -398,13 +399,13 @@ export default function CartView({
           <h2 className="font-display text-xl font-semibold uppercase tracking-wide text-ink sm:text-2xl">
             You may also like
           </h2>
-          <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4 lg:gap-6">
+          <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
             {recommendations.map((product) => (
               <ProductCard key={product.id} product={product} />
             ))}
           </div>
         </section>
       ) : null}
-    </div>
+    </SiteContainer>
   );
 }

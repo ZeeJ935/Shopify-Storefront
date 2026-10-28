@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import PopularTabs from "./components/popular-tabs";
 import ProductCarousel from "./components/product-carousel";
-import ProductCard from "./components/product-card";
+import SiteContainer from "./components/site-container";
 import { getNavCatalog } from "@/lib/catalog";
 import { getCollectionProductsPreview } from "@/lib/collections";
 import { getProducts } from "@/lib/products";
@@ -20,7 +20,7 @@ export default async function Home() {
     bestSelling,
   ] = await Promise.all([
     getCollectionProductsPreview("trending", 12),
-    getCollectionProductsPreview("sale", 4),
+    getCollectionProductsPreview("sale", 12),
     getCollectionProductsPreview("men", 8),
     getCollectionProductsPreview("women", 8),
     getProducts({ first: 12, sortKey: "CREATED_AT", reverse: true })
@@ -50,7 +50,7 @@ export default async function Home() {
           className="object-cover object-[center_40%] opacity-60 sm:object-center"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-ink via-ink/55 to-ink/20" />
-        <div className="relative mx-auto flex min-h-[72vh] max-w-7xl flex-col justify-end px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+        <SiteContainer className="relative flex min-h-[72vh] flex-col justify-end py-16 sm:py-20 lg:py-24">
           <h1 className="display-hero max-w-4xl">
             {heroConfig?.headline ?? "Gear for every mile"}
           </h1>
@@ -75,36 +75,38 @@ export default async function Home() {
               </Link>
             )}
           </div>
-        </div>
+        </SiteContainer>
       </section>
 
       {/* Trending */}
       {trendingProducts.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-          <div className="mb-8 flex items-end justify-between gap-4">
-            <h2 className="display-section text-ink">Trending now</h2>
-            <Link
-              href={
-                catalog.collections.has("trending")
-                  ? "/collections/trending"
-                  : "/collections/all"
-              }
-              className="hidden text-sm font-semibold uppercase tracking-wide underline-offset-2 hover:underline sm:inline"
-            >
-              View all
-            </Link>
-          </div>
-          <ProductCarousel
-            products={trendingProducts}
-            label="Trending products"
-          />
+        <section className="py-14 lg:py-20">
+          <SiteContainer>
+            <div className="mb-8 flex items-end justify-between gap-4">
+              <h2 className="display-section text-ink">Trending now</h2>
+              <Link
+                href={
+                  catalog.collections.has("trending")
+                    ? "/collections/trending"
+                    : "/collections/all"
+                }
+                className="hidden text-sm font-semibold uppercase tracking-wide underline-offset-2 hover:underline sm:inline"
+              >
+                View all
+              </Link>
+            </div>
+            <ProductCarousel
+              products={trendingProducts}
+              label="Trending products"
+            />
+          </SiteContainer>
         </section>
       )}
 
       {/* Shop by category */}
       {catalog.productTypeTiles.length > 0 && (
         <section className="bg-white py-14 lg:py-20">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <SiteContainer>
             <h2 className="display-section mb-8 text-ink">Shop by category</h2>
             <div className="grid gap-4 sm:grid-cols-3">
               {catalog.productTypeTiles.map((tile) => (
@@ -131,73 +133,77 @@ export default async function Home() {
                 </Link>
               ))}
             </div>
-          </div>
+          </SiteContainer>
         </section>
       )}
 
       {/* Shop by brand */}
       {catalog.brandTiles.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-          <h2 className="display-section mb-8 text-ink">Shop by brand</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {catalog.brandTiles.map((brand) => (
-              <Link
-                key={brand.label}
-                href={brand.href}
-                className="group relative min-h-56 overflow-hidden bg-mist sm:min-h-72"
-              >
-                {brand.sampleImage ? (
-                  <Image
-                    src={brand.sampleImage.url}
-                    alt=""
-                    fill
-                    sizes="(max-width: 640px) 100vw, 50vw"
-                    className="object-cover transition duration-500 group-hover:scale-[1.03]"
-                    aria-hidden="true"
-                  />
-                ) : null}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/70 to-transparent p-6 pt-16">
-                  <span className="flex items-center gap-2 font-display text-3xl font-bold uppercase tracking-wide text-snow">
-                    {brand.label}
-                    <span aria-hidden="true">→</span>
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
+        <section className="py-14 lg:py-20">
+          <SiteContainer>
+            <h2 className="display-section mb-8 text-ink">Shop by brand</h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {catalog.brandTiles.map((brand) => (
+                <Link
+                  key={brand.label}
+                  href={brand.href}
+                  className="group relative min-h-72 overflow-hidden bg-mist sm:min-h-96 lg:min-h-[28rem]"
+                >
+                  {brand.sampleImage ? (
+                    <Image
+                      src={brand.sampleImage.url}
+                      alt=""
+                      fill
+                      sizes="(max-width: 640px) 100vw, 50vw"
+                      className="object-cover transition duration-500 group-hover:scale-[1.03]"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/70 to-transparent p-6 pt-16">
+                    <span className="flex items-center gap-2 font-display text-3xl font-bold uppercase tracking-wide text-snow">
+                      {brand.label}
+                      <span aria-hidden="true">→</span>
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </SiteContainer>
         </section>
       )}
 
       {/* Popular right now */}
       {((men && men.length > 0) || (women && women.length > 0)) && (
         <section className="bg-white py-14 lg:py-20">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <SiteContainer>
             <h2 className="display-section mb-8 text-ink">Popular right now</h2>
             <PopularTabs men={men ?? []} women={women ?? []} />
-          </div>
+          </SiteContainer>
         </section>
       )}
 
       {/* New arrivals */}
       {newest.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-          <div className="mb-8 flex items-end justify-between gap-4">
-            <h2 className="display-section text-ink">New arrivals</h2>
-            <Link
-              href="/collections/all?sort=latest"
-              className="hidden text-sm font-semibold uppercase tracking-wide underline-offset-2 hover:underline sm:inline"
-            >
-              View all
-            </Link>
-          </div>
-          <ProductCarousel products={newest} label="New arrivals" />
+        <section className="py-14 lg:py-20">
+          <SiteContainer>
+            <div className="mb-8 flex items-end justify-between gap-4">
+              <h2 className="display-section text-ink">New arrivals</h2>
+              <Link
+                href="/collections/all?sort=latest"
+                className="hidden text-sm font-semibold uppercase tracking-wide underline-offset-2 hover:underline sm:inline"
+              >
+                View all
+              </Link>
+            </div>
+            <ProductCarousel products={newest} label="New arrivals" />
+          </SiteContainer>
         </section>
       )}
 
       {/* Sale strip */}
       {sale && sale.length > 0 && (
-        <section className="bg-ink py-14 text-snow lg:py-16">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <section className="bg-ink py-16 text-snow lg:py-24">
+          <SiteContainer>
             <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h2 className="display-section">On sale</h2>
@@ -212,18 +218,18 @@ export default async function Home() {
                 Shop sale
               </Link>
             </div>
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6 [&_h3]:text-snow [&_p]:text-mist [&_.text-ink]:text-snow [&_.text-steel]:text-mist [&_button]:text-snow [&_a]:text-snow">
-              {sale.slice(0, 4).map((product) => (
-                <ProductCard key={product.id} product={product} />
-              ))}
-            </div>
-          </div>
+            <ProductCarousel
+              products={sale}
+              label="Sale products"
+              tone="dark"
+            />
+          </SiteContainer>
         </section>
       )}
 
       {/* Brand / value strip */}
       <section className="border-y border-mist bg-white py-12">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:grid-cols-2 sm:px-6 lg:grid-cols-4 lg:px-8">
+        <SiteContainer className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
           {brandBenefits.map((b) => (
             <div key={b.id}>
               <h3 className="font-display text-sm font-bold uppercase tracking-wide text-ink">
@@ -237,7 +243,7 @@ export default async function Home() {
               </p>
             </div>
           ))}
-        </div>
+        </SiteContainer>
       </section>
     </main>
   );

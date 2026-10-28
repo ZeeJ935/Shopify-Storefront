@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import SiteContainer from "@/app/components/site-container";
 import { getCollectionsIndex } from "@/lib/collections";
 
 
@@ -17,7 +18,8 @@ export default async function CollectionsIndexPage() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+    <main>
+      <SiteContainer className="py-12">
       <h1 className="display-section text-ink">Collections</h1>
       <p className="mt-3 max-w-xl text-steel">
         Shop by category, brand, and seasonal edits from the live catalog.
@@ -58,6 +60,7 @@ export default async function CollectionsIndexPage() {
           </li>
         ))}
       </ul>
+      </SiteContainer>
     </main>
   );
 }

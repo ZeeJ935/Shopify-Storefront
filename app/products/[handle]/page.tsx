@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import FavoriteButton from "@/app/components/favorite-button";
 import ProductGallery from "@/app/components/product-gallery";
+import SiteContainer from "@/app/components/site-container";
 import { getProductByHandle } from "@/lib/products";
 import { getSiteUrl } from "@/lib/site-url";
 import VariantSelector from "./variant-selector";
@@ -75,11 +76,12 @@ export default async function ProductPage({ params }: ProductPageProps) {
   const jsonLdHtml = JSON.stringify(jsonLd).replace(/</g, "\\u003c");
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-10 sm:px-8 sm:py-14">
+    <main>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
       />
+      <SiteContainer className="py-10 sm:py-14">
       <Link
         href="/collections/all"
         className="mb-8 inline-flex min-h-11 items-center text-sm font-medium text-steel hover:text-ink hover:underline"
@@ -116,6 +118,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           ) : null}
         </section>
       </div>
+      </SiteContainer>
     </main>
   );
 }

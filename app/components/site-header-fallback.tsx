@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { siteBrand } from "@/lib/site-content";
+import SiteContainer from "./site-container";
 
 export default function SiteHeaderFallback() {
   return (
     <header className="sticky top-0 z-50 border-b border-white/50 bg-snow/55 backdrop-blur-xl supports-[backdrop-filter]:bg-snow/40">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+      <SiteContainer className="flex items-center justify-between gap-4 py-3">
         <Link
           href="/"
           className="font-display text-lg font-bold tracking-tight text-ink sm:text-xl"
@@ -25,7 +26,7 @@ export default function SiteHeaderFallback() {
             Cart
           </Link>
         </nav>
-      </div>
+      </SiteContainer>
     </header>
   );
 }

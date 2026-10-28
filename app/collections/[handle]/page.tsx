@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import SiteContainer from "@/app/components/site-container";
 import {
   parseCatalogParams,
   queryCatalog,
@@ -108,24 +109,26 @@ export default async function CollectionPage({
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
-      <nav aria-label="Breadcrumb" className="mb-6 text-sm text-steel">
-        <ol className="flex flex-wrap gap-2">
-          <li>
-            <Link href="/" className="hover:underline">
-              Home
-            </Link>
-          </li>
-          <li aria-hidden="true">/</li>
-          <li>
-            <Link href="/collections" className="hover:underline">
-              Collections
-            </Link>
-          </li>
-          <li aria-hidden="true">/</li>
-          <li className="text-ink">{meta.title}</li>
-        </ol>
-      </nav>
+    <main className="py-8 lg:py-12">
+      <SiteContainer>
+        <nav aria-label="Breadcrumb" className="mb-6 text-sm text-steel">
+          <ol className="flex flex-wrap gap-2">
+            <li>
+              <Link href="/" className="hover:underline">
+                Home
+              </Link>
+            </li>
+            <li aria-hidden="true">/</li>
+            <li>
+              <Link href="/collections" className="hover:underline">
+                Collections
+              </Link>
+            </li>
+            <li aria-hidden="true">/</li>
+            <li className="text-ink">{meta.title}</li>
+          </ol>
+        </nav>
+      </SiteContainer>
 
       {meta.image && (
         <div className="relative mb-8 aspect-[21/6] overflow-hidden bg-mist">
@@ -138,36 +141,38 @@ export default async function CollectionPage({
             className="object-cover"
           />
           <div className="absolute inset-0 bg-ink/25" />
-          <div className="absolute inset-0 flex items-end p-6 sm:p-10">
+          <SiteContainer className="absolute inset-0 flex items-end py-6 sm:py-10">
             <h1 className="display-section text-snow">{meta.title}</h1>
-          </div>
+          </SiteContainer>
         </div>
       )}
 
-      {!meta.image && (
-        <h1 className="display-section text-ink">{meta.title}</h1>
-      )}
+      <SiteContainer>
+        {!meta.image && (
+          <h1 className="display-section text-ink">{meta.title}</h1>
+        )}
 
-      {meta.description && (
-        <p className="mt-3 max-w-2xl text-steel">{meta.description}</p>
-      )}
+        {meta.description && (
+          <p className="mt-3 max-w-2xl text-steel">{meta.description}</p>
+        )}
 
-      <div className="mt-8">
-        <Suspense fallback={<p className="text-steel">Loading products…</p>}>
-          <CollectionBrowse
-            key={`${handle}?${sp.toString()}`}
-            scope={handle}
-            initialProducts={result.products}
-            initialTotal={result.total}
-            initialPage={1}
-            initialHasNextPage={result.hasNextPage}
-            facets={result.facets}
-            priceBounds={result.priceBounds}
-            sortOptions={result.sortOptions}
-            initialSort={result.sort}
-          />
-        </Suspense>
-      </div>
+        <div className="mt-8">
+          <Suspense fallback={<p className="text-steel">Loading products…</p>}>
+            <CollectionBrowse
+              key={`${handle}?${sp.toString()}`}
+              scope={handle}
+              initialProducts={result.products}
+              initialTotal={result.total}
+              initialPage={1}
+              initialHasNextPage={result.hasNextPage}
+              facets={result.facets}
+              priceBounds={result.priceBounds}
+              sortOptions={result.sortOptions}
+              initialSort={result.sort}
+            />
+          </Suspense>
+        </div>
+      </SiteContainer>
     </main>
   );
 }

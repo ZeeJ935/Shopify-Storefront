@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import ProductCard from "@/app/components/product-card";
+import SiteContainer from "@/app/components/site-container";
 import { getCart } from "@/lib/cart";
 import { CART_COOKIE } from "@/lib/cart-cookie";
 import {
@@ -33,7 +34,8 @@ function EmptyBag({
   const featured = recommendations.slice(0, 4);
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
+    <main>
+      <SiteContainer boxed className="py-14 sm:py-20">
       <div className="mx-auto max-w-lg text-center">
         <h1 className="font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
           {title}
@@ -49,13 +51,14 @@ function EmptyBag({
           <h2 className="font-display text-xl font-semibold uppercase tracking-wide text-ink sm:text-2xl">
             You may also like
           </h2>
-          <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4 lg:gap-6">
+          <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 lg:gap-6">
             {featured.map((product) => (
               <ProductCard key={product.id} product={product} />
             ))}
           </div>
         </section>
       ) : null}
+      </SiteContainer>
     </main>
   );
 }

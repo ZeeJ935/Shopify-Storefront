@@ -1,9 +1,10 @@
+import SiteContainer from "@/app/components/site-container";
 import Skeleton from "@/app/components/skeleton";
 
 export default function CollectionsLoading() {
   return (
-    <div
-      className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8"
+    <SiteContainer
+      className="py-12"
       aria-busy="true"
       aria-label="Loading collection"
     >
@@ -18,6 +19,6 @@ export default function CollectionsLoading() {
           </div>
         ))}
       </div>
-    </div>
+    </SiteContainer>
   );
 }

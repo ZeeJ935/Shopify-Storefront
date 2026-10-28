@@ -19,6 +19,7 @@ import { siteBrand } from "@/lib/site-content";
 import { useFavorites } from "./favorites-provider";
 import LogoutButton from "./logout-button";
 import SearchDrawer from "./search-drawer";
+import SiteContainer from "./site-container";
 
 type SiteHeaderShellProps = {
   links: ResolvedNavLink[];
@@ -228,7 +229,7 @@ export default function SiteHeaderShell({
           scrolled ? "bg-snow/70 shadow-sm supports-[backdrop-filter]:bg-snow/55" : ""
         }`}
       >
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        <SiteContainer className="flex items-center gap-3 py-3">
           <button
             ref={menuButtonRef}
             type="button"
@@ -374,7 +375,7 @@ export default function SiteHeaderShell({
               )}
             </Link>
           </div>
-        </div>
+        </SiteContainer>
 
         {activeMega && (
           <div
@@ -386,7 +387,7 @@ export default function SiteHeaderShell({
             onMouseLeave={scheduleClose}
           >
             {activeMega.id === "catalog" ? (
-              <div className="mx-auto grid max-w-7xl gap-8 px-6 py-8 sm:grid-cols-2 lg:grid-cols-4 lg:px-8">
+              <SiteContainer className="grid gap-8 py-8 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-steel">
                     Shop by Category
@@ -487,9 +488,9 @@ export default function SiteHeaderShell({
                     )}
                   </ul>
                 </div>
-              </div>
+              </SiteContainer>
             ) : (
-              <div className="mx-auto grid max-w-7xl gap-8 px-6 py-8 lg:grid-cols-12 lg:px-8">
+              <SiteContainer className="grid gap-8 py-8 lg:grid-cols-12">
                 <div className="lg:col-span-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-steel">
                     Shop {activeMega.label}
@@ -569,7 +570,7 @@ export default function SiteHeaderShell({
                     </Link>
                   ))}
                 </div>
-              </div>
+              </SiteContainer>
             )}
           </div>
         )}

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import SiteContainer from "@/app/components/site-container";
 import {
   parseCatalogParams,
   queryCatalog,
@@ -66,7 +67,8 @@ export default async function AllProductsPage({ searchParams }: PageProps) {
       : "All products";
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+    <main>
+      <SiteContainer className="py-8 lg:py-12">
       <nav aria-label="Breadcrumb" className="mb-6 text-sm text-steel">
         <ol className="flex flex-wrap gap-2">
           <li>
@@ -106,6 +108,7 @@ export default async function AllProductsPage({ searchParams }: PageProps) {
           />
         </Suspense>
       </div>
+      </SiteContainer>
     </main>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import ProductCard from "@/app/components/product-card";
+import SiteContainer from "@/app/components/site-container";
 import { searchProducts } from "@/lib/search";
 
 
@@ -45,7 +46,8 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       : null;
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+    <main>
+      <SiteContainer className="py-12">
       <h1 className="display-section text-ink">Search</h1>
       <form action="/search" className="mt-6 max-w-xl">
         <label htmlFor="q" className="sr-only">
@@ -100,6 +102,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           )}
         </Suspense>
       )}
+      </SiteContainer>
     </main>
   );
 }
