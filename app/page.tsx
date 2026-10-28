@@ -53,9 +53,6 @@ export default async function Home() {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-ink via-ink/55 to-ink/20" />
         <div className="relative mx-auto flex min-h-[72vh] max-w-7xl flex-col justify-end px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-mist">
-            {siteBrand.name}
-          </p>
           <h1 className="display-hero max-w-4xl">
             {heroConfig?.headline ?? "Gear for every mile"}
           </h1>
