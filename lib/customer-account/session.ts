@@ -25,6 +25,7 @@ export type CustomerSession = {
 export type PkcePayload = {
   state: string;
   verifier: string;
+  returnTo?: string;
 };
 
 function keyFromSecret(secret: string) {

@@ -113,7 +113,11 @@ export default function SiteHeaderShell({
   shopName = siteBrand.name,
   isAuthenticated = false,
 }: SiteHeaderShellProps) {
-  const { hydrated: favHydrated, count: favCount } = useFavorites();
+  const {
+    hydrated: favHydrated,
+    count: favCount,
+    goToFavourites,
+  } = useFavorites();
   const [scrolled, setScrolled] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -289,14 +293,15 @@ export default function SiteHeaderShell({
             >
               <SearchIcon />
             </button>
-            <Link
-              href="/account/favourites"
+            <button
+              type="button"
               className="relative inline-flex h-11 w-11 items-center justify-center text-ink hover:bg-mist/60"
               aria-label={
                 favHydrated && favCount > 0
                   ? `Favourites, ${favCount} items`
                   : "Favourites"
               }
+              onClick={goToFavourites}
             >
               <HeartNavIcon />
               {favHydrated && favCount > 0 ? (
@@ -307,7 +312,7 @@ export default function SiteHeaderShell({
                   {favCount > 99 ? "99+" : favCount}
                 </span>
               ) : null}
-            </Link>
+            </button>
             <div
               className="relative hidden sm:block"
               onMouseEnter={() => setAccountOpen(true)}
@@ -336,12 +341,6 @@ export default function SiteHeaderShell({
                         className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
                       >
                         Orders
-                      </Link>
-                      <Link
-                        href="/account/favourites"
-                        className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
-                      >
-                        Favourites
                       </Link>
                       <LogoutButton className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-mist/50">
                         Log out
@@ -745,36 +744,18 @@ export default function SiteHeaderShell({
                   >
                     Orders
                   </Link>
-                  <Link
-                    href="/account/favourites"
-                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    Favourites
-                    {favHydrated && favCount > 0 ? ` (${favCount})` : ""}
-                  </Link>
                   <LogoutButton className="flex min-h-11 w-full items-center px-1 text-left text-sm font-semibold uppercase tracking-wide">
                     Log out
                   </LogoutButton>
                 </>
               ) : (
-                <>
-                  <Link
-                    href="/account/login"
-                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    Account
-                  </Link>
-                  <Link
-                    href="/account/favourites"
-                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    Favourites
-                    {favHydrated && favCount > 0 ? ` (${favCount})` : ""}
-                  </Link>
-                </>
+                <Link
+                  href="/account/login"
+                  className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  Account
+                </Link>
               )}
               <Link
                 href="/cart"

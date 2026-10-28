@@ -49,8 +49,18 @@ Production callback example: `https://shopify-storefront-ruby.vercel.app/account
 - Account data loaders require a session; unauthenticated users are sent through authorize/login
 - Cart cookies and checkout URL validation are unchanged (buyer identity attachment is out of scope for v1)
 
+## Favourites metafield (required)
+
+Create a **Customer** metafield definition in Shopify Admin:
+
+1. Settings → Custom data → Customers → Add definition
+2. Namespace and key: `custom.favourites`
+3. Type: **JSON**
+4. Access → Customer account API: **Read and write**
+
+Without this, saving favourites returns “Access to this namespace and key on Metafields… is not allowed.”
+
 ## Remaining gaps (intentional)
 
-- Address create/edit UI
 - Attaching customer access token to cart buyer identity
 - Manual login → orders → logout smoke test against a real customer account

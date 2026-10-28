@@ -16,8 +16,12 @@ import {
   syncFavouritesOnLogin,
 } from "@/app/favourites/actions";
 import {
+  clearFavouritesIntent,
   clearLocalFavourites,
+  loginUrlForFavourites,
+  readFavouritesIntent,
   readLocalFavourites,
+  writeFavouritesIntent,
 } from "@/lib/favourites";
 import { useStorefrontToast } from "./storefront-toast";
 
@@ -29,11 +33,16 @@ type FavoritesContextValue = {
   isFavourite: (productId: string) => boolean;
   /** Returns false if redirected to login (guest). */
   toggle: (productId: string) => boolean;
+  /** Navbar / guest entry: login then land on favourites. */
+  goToFavourites: () => void;
 };
 
 const FavoritesContext = createContext<FavoritesContextValue | null>(null);
 
-const LOGIN_HREF = "/account/login";
+function currentPath(): string {
+  if (typeof window === "undefined") return "/";
+  return `${window.location.pathname}${window.location.search}`;
+}
 
 export function FavoritesProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -47,6 +56,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
     async function hydrate() {
       const local = readLocalFavourites();
+      const intent = readFavouritesIntent();
 
       try {
         const remote = await getFavouritesState();
@@ -54,14 +64,49 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
         if (remote.authenticated) {
           setAuthenticated(true);
-          if (local.length > 0) {
-            const synced = await syncFavouritesOnLogin(local);
+
+          let nextIds = remote.ids;
+          try {
+            if (local.length > 0) {
+              const synced = await syncFavouritesOnLogin(local);
+              if (cancelled) return;
+              nextIds = synced.ids;
+              clearLocalFavourites();
+            } else {
+              clearLocalFavourites();
+            }
+
+            if (
+              intent?.addProductId &&
+              !nextIds.includes(intent.addProductId)
+            ) {
+              const withPending = [...nextIds, intent.addProductId];
+              setIds(withPending);
+              clearFavouritesIntent();
+              const result = await saveFavourites(withPending);
+              if (cancelled) return;
+              if (!result.ok) {
+                setIds(nextIds);
+                pushToast(
+                  result.message || "Could not update favourites.",
+                  "error",
+                );
+              }
+            } else {
+              setIds(nextIds);
+              clearFavouritesIntent();
+            }
+          } catch (error) {
             if (cancelled) return;
-            setIds(synced.ids);
+            setIds(nextIds);
+            clearFavouritesIntent();
             clearLocalFavourites();
-          } else {
-            setIds(remote.ids);
-            clearLocalFavourites();
+            pushToast(
+              error instanceof Error
+                ? error.message
+                : "Could not sync favourites.",
+              "error",
+            );
           }
         } else {
           setAuthenticated(false);
@@ -82,14 +127,31 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pushToast]);
+
+  const goToFavourites = useCallback(() => {
+    if (authenticated) {
+      router.push("/account/favourites");
+      return;
+    }
+    const intent = {
+      returnTo: "/account/favourites",
+    };
+    writeFavouritesIntent(intent);
+    router.push(loginUrlForFavourites(intent));
+  }, [authenticated, router]);
 
   const toggle = useCallback(
     (productId: string) => {
       if (!productId) return false;
 
       if (!authenticated) {
-        router.push(LOGIN_HREF);
+        const intent = {
+          returnTo: currentPath(),
+          addProductId: productId,
+        };
+        writeFavouritesIntent(intent);
+        router.push(loginUrlForFavourites(intent));
         return false;
       }
 
@@ -126,8 +188,9 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       isFavourite: (productId: string) =>
         authenticated && idSet.has(productId),
       toggle,
+      goToFavourites,
     }),
-    [hydrated, authenticated, idSet, ids.length, toggle],
+    [hydrated, authenticated, idSet, ids.length, toggle, goToFavourites],
   );
 
   return (

@@ -40,13 +40,13 @@ export async function syncFavouritesOnLogin(
     const merged = mergeFavouriteIds(remote, parseFavouriteIds(localIds));
     const result = await setCustomerFavouriteIds(merged);
     if (!result.ok) {
-      throw new Error(result.message || "Could not sync favourites.");
+      throw new Error(friendlyFavouritesError(result.message));
     }
     return { authenticated: true, ids: merged };
   } catch (error) {
     throw error instanceof Error
-      ? error
-      : new Error("Could not sync favourites.");
+      ? new Error(friendlyFavouritesError(error.message))
+      : new Error(friendlyFavouritesError());
   }
 }
 
@@ -62,14 +62,23 @@ export async function saveFavourites(
     const result = await setCustomerFavouriteIds(parseFavouriteIds(ids));
     return result.ok
       ? { ok: true }
-      : { ok: false, message: result.message || "Could not save favourites." };
+      : { ok: false, message: friendlyFavouritesError(result.message) };
   } catch (error) {
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Could not save favourites.",
+      message: friendlyFavouritesError(
+        error instanceof Error ? error.message : undefined,
+      ),
     };
   }
+}
+
+function friendlyFavouritesError(message?: string) {
+  const raw = message || "Could not save favourites.";
+  if (/namespace and key on Metafields|not allowed/i.test(raw)) {
+    return "Favourites aren’t set up in Shopify yet. In Admin, create a customer metafield custom.favourites (JSON) with Customer account access: Read and write.";
+  }
+  return raw;
 }
 
 export async function loadFavouriteProducts(

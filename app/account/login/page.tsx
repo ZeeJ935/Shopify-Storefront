@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { hasCustomerSession } from "@/lib/customer-account/session";
-
-export const instant = false;
+import { safeReturnTo } from "@/lib/favourites";
+import LoginIntentCapture from "./login-intent-capture";
 
 type LoginPageProps = {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; returnTo?: string; add?: string }>;
 };
 
 function errorMessage(code?: string) {
@@ -22,15 +22,20 @@ function errorMessage(code?: string) {
 }
 
 export default async function AccountLoginPage({ searchParams }: LoginPageProps) {
+  const params = await searchParams;
+  const returnTo = safeReturnTo(params.returnTo);
+  const add = params.add?.trim() || undefined;
+
   if (await hasCustomerSession()) {
-    redirect("/account");
+    redirect(returnTo);
   }
 
-  const { error } = await searchParams;
-  const message = errorMessage(error);
+  const message = errorMessage(params.error);
+  const authorizeHref = `/account/authorize?returnTo=${encodeURIComponent(returnTo)}`;
 
   return (
     <main className="mx-auto flex min-h-[60vh] max-w-lg flex-col justify-center px-4 py-16 sm:px-6 lg:px-8">
+      <LoginIntentCapture returnTo={returnTo} addProductId={add} />
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-steel">
         Account
       </p>
@@ -44,13 +49,16 @@ export default async function AccountLoginPage({ searchParams }: LoginPageProps)
       </p>
 
       {message ? (
-        <p role="alert" className="mt-6 border border-mist bg-mist/40 px-4 py-3 text-sm text-danger">
+        <p
+          role="alert"
+          className="mt-6 border border-mist bg-mist/40 px-4 py-3 text-sm text-danger"
+        >
           {message}
         </p>
       ) : null}
 
       <div className="mt-8 space-y-3">
-        <Link href="/account/authorize" className="btn btn-primary w-full">
+        <Link href={authorizeHref} className="btn btn-primary w-full">
           Continue with Shopify
         </Link>
         <Link

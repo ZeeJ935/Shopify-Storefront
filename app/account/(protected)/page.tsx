@@ -119,14 +119,6 @@ export default async function AccountPage() {
             </li>
             <li>
               <Link
-                href="/account/favourites"
-                className="font-medium text-steel hover:text-ink hover:underline"
-              >
-                Favourites
-              </Link>
-            </li>
-            <li>
-              <Link
                 href="/account/profile"
                 className="font-medium text-steel hover:text-ink hover:underline"
               >

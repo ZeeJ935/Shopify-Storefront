@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeReturnTo } from "@/lib/favourites";
 import { getCustomerAccountConfig } from "./config";
 import { getCustomerAccountDiscovery } from "./discovery";
 import {
@@ -23,6 +24,9 @@ export async function beginCustomerAuthorization(requestUrl: string) {
   const state = createOAuthState();
   const verifier = createCodeVerifier();
   const challenge = createCodeChallenge(verifier);
+  const returnTo = safeReturnTo(
+    new URL(requestUrl).searchParams.get("returnTo"),
+  );
 
   const url = new URL(openid.authorization_endpoint);
   url.searchParams.set("client_id", config.clientId);
@@ -34,9 +38,7 @@ export async function beginCustomerAuthorization(requestUrl: string) {
   url.searchParams.set("code_challenge_method", "S256");
 
   const response = NextResponse.redirect(url.toString(), 302);
-  applyPkceCookie(response, { state, verifier });
-  // Ensure absolute redirect works even if request host differs
-  void requestUrl;
+  applyPkceCookie(response, { state, verifier, returnTo });
   return response;
 }
 
@@ -116,9 +118,10 @@ export async function completeCustomerAuthorization(input: {
 
   const token = await postToken(body);
   const session = toSession(token);
+  const returnTo = safeReturnTo(pkce.returnTo);
 
   const response = NextResponse.redirect(
-    new URL("/account", input.requestUrl),
+    new URL(returnTo, input.requestUrl),
     302,
   );
   applyCustomerSession(response, session);
