@@ -19,7 +19,7 @@ export default function SiteContainer({
   ...rest
 }: SiteContainerProps) {
   const width = narrow
-    ? `mx-auto w-full max-w-[960px] ${PAD}`
+    ? `mx-auto w-full max-w-[1400px] ${PAD}`
     : boxed
       ? `mx-auto w-full max-w-7xl ${PAD}`
       : `w-full ${PAD}`;
