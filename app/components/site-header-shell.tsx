@@ -251,7 +251,7 @@ export default function SiteHeaderShell({
 
           <nav
             aria-label="Primary"
-            className="ml-4 hidden min-w-0 flex-1 items-center gap-0.5 lg:flex"
+            className="ml-4 hidden min-w-0 flex-1 items-center justify-center gap-0.5 lg:flex"
             onMouseLeave={scheduleClose}
           >
             {links.map((link) => (
