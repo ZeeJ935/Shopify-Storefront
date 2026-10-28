@@ -6,7 +6,6 @@ import { getProductByHandle } from "@/lib/products";
 import { getSiteUrl } from "@/lib/site-url";
 import VariantSelector from "./variant-selector";
 
-export const instant = false;
 
 type ProductPageProps = {
   params: Promise<{ handle: string }>;

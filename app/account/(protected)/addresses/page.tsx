@@ -2,7 +2,6 @@ import { unstable_rethrow } from "next/navigation";
 import AddressesManager from "@/app/account/components/addresses-manager";
 import { getCustomerAddresses } from "@/lib/customer-account/api";
 
-export const instant = false;
 
 export default async function AccountAddressesPage() {
   let addresses;

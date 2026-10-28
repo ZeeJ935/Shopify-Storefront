@@ -1,36 +1,103 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ZJ Headless Storefront
 
-## Getting Started
+Next.js App Router storefront for a Shopify shop (Nike / Adidas demo catalog). Uses the **Storefront API** for catalog/cart/checkout and the **Customer Account API** (OAuth + PKCE) for login, orders, addresses, profile, and favourites — no local customer database.
 
-First, run the development server:
+**Stack:** Next.js 16 · React 19 · TypeScript · Tailwind CSS 4 · Shopify GraphQL `2026-10`
+
+## Features
+
+| Area | What’s included |
+|------|-----------------|
+| Catalog | Home, collections (filters/sort), product detail, search + predictive search |
+| Cart | Cookie cart, line qty, discounts, Shopify hosted checkout |
+| Account | Login/signup via Shopify, overview, orders, addresses CRUD, profile |
+| Favourites | Login-required hearts on cards/PDP; synced to customer metafield `custom.favourites` |
+| SEO | `sitemap.ts`, `robots.ts`, Shopify CDN images |
+
+Guest hearts and the navbar heart send users through login with a return path (product page + pending add, or `/account/favourites`).
+
+## Setup
 
 ```bash
+cp .env.example .env
+# fill values — see below
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy from `.env.example`. Never prefix Storefront or Customer Account secrets with `NEXT_PUBLIC_`.
 
-## Learn More
+| Variable | Purpose |
+|----------|---------|
+| `SHOPIFY_STORE_DOMAIN` | `your-store.myshopify.com` |
+| `SHOPIFY_STOREFRONT_ACCESS_TOKEN` | Storefront API token |
+| `SITE_URL` | Public origin (sitemap, metadata, logout fallback) |
+| `SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID` | Headless channel confidential client |
+| `SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET` | Client secret |
+| `SHOPIFY_CUSTOMER_ACCOUNT_SHOP_ID` | Shop ID from Headless / Customer Account setup |
+| `SHOPIFY_CUSTOMER_ACCOUNT_CALLBACK_URL` | Must match Admin exactly (e.g. `…/account/callback`) |
+| `SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET` | ≥32 chars (`openssl rand -base64 48`) |
+| `SHOPIFY_CUSTOMER_ACCOUNT_LOGOUT_REDIRECT_URL` | Optional; defaults to `SITE_URL` |
 
-To learn more about Next.js, take a look at the following resources:
+Full Admin steps (Headless channel, New customer accounts, favourites metafield): **[docs/customer-accounts-admin.md](docs/customer-accounts-admin.md)**.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Favourites metafield (required)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+In Shopify Admin → **Settings → Custom data → Customers**:
 
-## Deploy on Vercel
+1. Add definition, namespace/key **`custom.favourites`**, type **JSON**
+2. **Customer Account API access:** Read and write
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Without this, saving favourites fails with a metafield access error.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Routes
+
+| Path | Notes |
+|------|--------|
+| `/` | Home |
+| `/collections`, `/collections/[handle]`, `/collections/all` | Browse + filters |
+| `/products/[handle]` | PDP |
+| `/search` | Search results |
+| `/cart` | Cart |
+| `/account/login` | Login entry (`returnTo`, optional `add` product id) |
+| `/account/authorize` · `/account/callback` · `/account/logout` | OAuth |
+| `/account` · `/orders` · `/addresses` · `/profile` | Protected account |
+| `/account/favourites` | Favourites page (navbar heart; not in account tabs) |
+
+## Project layout
+
+```
+app/           Pages, account OAuth routes, cart/favourites actions, UI
+lib/           Shopify Storefront + Customer Account clients, cart, catalog, favourites
+docs/          Customer Account Admin setup
+scripts/       Local helpers (cart smoke, unit asserts) — run with npx tsx
+```
+
+Marketing copy and brand labels live in `lib/site-content.ts`.
+
+## Scripts
+
+```bash
+npm run dev      # development
+npm run build    # production build
+npm run start    # serve build
+npm run lint     # eslint
+
+npx tsx scripts/test-cart.ts <product-handle>
+npx tsx scripts/audit-unit.ts
+```
+
+## Deploy
+
+Deploy on Vercel (or any Node host). Set the same env vars in the host, and add the production callback URL in the Headless Customer Account API settings.
+
+Local Customer Account login needs an HTTPS callback that matches Admin (tunnel) unless you only test catalog/cart anonymously.
+
+## Known gaps
+
+- Cart is not linked to the customer access token (buyer identity) yet
+- Some announcement / policy copy in `lib/site-content.ts` is demo placeholder

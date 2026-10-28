@@ -3,7 +3,6 @@ import { unstable_rethrow } from "next/navigation";
 import OrderCard from "@/app/account/components/order-card";
 import { getCustomerOrders } from "@/lib/customer-account/api";
 
-export const instant = false;
 
 type OrdersPageProps = {
   searchParams: Promise<{ after?: string }>;

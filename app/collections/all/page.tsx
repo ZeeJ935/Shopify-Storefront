@@ -6,7 +6,6 @@ import {
 } from "@/lib/catalog-query";
 import CollectionBrowse from "../collection-browse";
 
-export const instant = false;
 
 export const metadata = {
   title: "Catalog",

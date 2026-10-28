@@ -10,7 +10,6 @@ import { getCatalogSnapshot } from "@/lib/catalog-snapshot";
 import { shopifyFetch, CATALOG_REVALIDATE } from "@/lib/shopify";
 import CollectionBrowse from "../collection-browse";
 
-export const instant = false;
 
 type PageProps = {
   params: Promise<{ handle: string }>;

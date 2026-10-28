@@ -3,7 +3,6 @@ import { Suspense } from "react";
 import ProductCard from "@/app/components/product-card";
 import { searchProducts } from "@/lib/search";
 
-export const instant = false;
 
 type SearchPageProps = {
   searchParams: Promise<{ q?: string; after?: string }>;

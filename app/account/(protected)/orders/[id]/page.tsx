@@ -6,7 +6,6 @@ import StatusBadge from "@/app/account/components/status-badge";
 import { getCustomerOrderById } from "@/lib/customer-account/api";
 import { formatMoney } from "@/lib/money";
 
-export const instant = false;
 
 type OrderDetailPageProps = {
   params: Promise<{ id: string }>;

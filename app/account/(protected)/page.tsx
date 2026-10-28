@@ -7,7 +7,6 @@ import {
   getCustomerProfile,
 } from "@/lib/customer-account/api";
 
-export const instant = false;
 
 export default async function AccountPage() {
   let profile;

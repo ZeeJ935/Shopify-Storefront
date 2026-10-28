@@ -2,7 +2,6 @@ import { unstable_rethrow } from "next/navigation";
 import ProfileForm from "@/app/account/components/profile-form";
 import { getCustomerProfile } from "@/lib/customer-account/api";
 
-export const instant = false;
 
 export default async function AccountProfilePage() {
   let profile;

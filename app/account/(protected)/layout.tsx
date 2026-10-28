@@ -2,7 +2,6 @@ import AccountShell from "@/app/account/components/account-shell";
 import { getCustomerProfile } from "@/lib/customer-account/api";
 import { requireCustomerSession } from "@/lib/customer-account/require-session";
 
-export const instant = false;
 
 export default async function ProtectedAccountLayout({
   children,

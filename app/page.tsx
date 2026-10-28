@@ -8,8 +8,6 @@ import { getCollectionProductsPreview } from "@/lib/collections";
 import { getProducts } from "@/lib/products";
 import { brandBenefits, heroSlides, siteBrand } from "@/lib/site-content";
 
-export const instant = false;
-
 export default async function Home() {
   const catalog = await getNavCatalog();
 

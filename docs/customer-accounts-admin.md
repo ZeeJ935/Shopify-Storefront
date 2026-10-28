@@ -14,11 +14,13 @@ Headless storefront uses the **Customer Account API** (OAuth 2.0 + PKCE, confide
 |------|---------|
 | `/account/login` | Log in / sign up entry |
 | `/account/authorize` | Starts OAuth (sets PKCE cookies, redirects to Shopify) |
-| `/account/callback` | Token exchange → session cookie → `/account` |
+| `/account/callback` | Token exchange → session cookie → `returnTo` (default `/account`) |
 | `/account` | Account hub (protected) |
 | `/account/orders` | Order list (protected) |
 | `/account/orders/[id]` | Order detail (protected) |
-| `/account/addresses` | Addresses read-only (protected) |
+| `/account/addresses` | Addresses CRUD (protected) |
+| `/account/profile` | Profile edit (protected) |
+| `/account/favourites` | Favourites wishlist (login required; navbar entry) |
 | `/account/logout` | Clears session + Shopify end-session |
 
 ## App env (see `.env.example`)
@@ -63,4 +65,3 @@ Without this, saving favourites returns “Access to this namespace and key on M
 ## Remaining gaps (intentional)
 
 - Attaching customer access token to cart buyer identity
-- Manual login → orders → logout smoke test against a real customer account

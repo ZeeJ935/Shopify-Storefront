@@ -11,7 +11,6 @@ import {
 import { getProducts, type ProductListItem } from "@/lib/products";
 import CartView from "./cart-view";
 
-export const instant = false;
 
 async function loadRecommendations(): Promise<ProductListItem[]> {
   try {
