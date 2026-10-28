@@ -16,6 +16,7 @@ import type {
   ResolvedNavLink,
 } from "@/lib/catalog";
 import { siteBrand } from "@/lib/site-content";
+import { useFavorites } from "./favorites-provider";
 import LogoutButton from "./logout-button";
 import SearchDrawer from "./search-drawer";
 
@@ -67,6 +68,24 @@ function SearchIcon() {
   );
 }
 
+function HeartNavIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-5 w-5"
+      aria-hidden="true"
+    >
+      <path d="M19.5 12.572 12 20l-7.5-7.428A4.75 4.75 0 0 1 12 5.246a4.75 4.75 0 0 1 7.5 7.326Z" />
+    </svg>
+  );
+}
+
 function MenuIcon({ open }: { open: boolean }) {
   return open ? (
     <span className="text-lg leading-none" aria-hidden="true">
@@ -94,6 +113,7 @@ export default function SiteHeaderShell({
   shopName = siteBrand.name,
   isAuthenticated = false,
 }: SiteHeaderShellProps) {
+  const { hydrated: favHydrated, count: favCount } = useFavorites();
   const [scrolled, setScrolled] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -269,6 +289,25 @@ export default function SiteHeaderShell({
             >
               <SearchIcon />
             </button>
+            <Link
+              href="/account/favourites"
+              className="relative inline-flex h-11 w-11 items-center justify-center text-ink hover:bg-mist/60"
+              aria-label={
+                favHydrated && favCount > 0
+                  ? `Favourites, ${favCount} items`
+                  : "Favourites"
+              }
+            >
+              <HeartNavIcon />
+              {favHydrated && favCount > 0 ? (
+                <span
+                  className="absolute right-0.5 top-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-ink px-1 text-[11px] font-semibold text-snow"
+                  aria-hidden="true"
+                >
+                  {favCount > 99 ? "99+" : favCount}
+                </span>
+              ) : null}
+            </Link>
             <div
               className="relative hidden sm:block"
               onMouseEnter={() => setAccountOpen(true)}
@@ -297,6 +336,12 @@ export default function SiteHeaderShell({
                         className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
                       >
                         Orders
+                      </Link>
+                      <Link
+                        href="/account/favourites"
+                        className="block px-4 py-2 text-sm text-ink hover:bg-mist/50"
+                      >
+                        Favourites
                       </Link>
                       <LogoutButton className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-mist/50">
                         Log out
@@ -700,18 +745,36 @@ export default function SiteHeaderShell({
                   >
                     Orders
                   </Link>
+                  <Link
+                    href="/account/favourites"
+                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    Favourites
+                    {favHydrated && favCount > 0 ? ` (${favCount})` : ""}
+                  </Link>
                   <LogoutButton className="flex min-h-11 w-full items-center px-1 text-left text-sm font-semibold uppercase tracking-wide">
                     Log out
                   </LogoutButton>
                 </>
               ) : (
-                <Link
-                  href="/account/login"
-                  className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  Account
-                </Link>
+                <>
+                  <Link
+                    href="/account/login"
+                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    Account
+                  </Link>
+                  <Link
+                    href="/account/favourites"
+                    className="flex min-h-11 items-center px-1 text-sm font-semibold uppercase tracking-wide"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    Favourites
+                    {favHydrated && favCount > 0 ? ` (${favCount})` : ""}
+                  </Link>
+                </>
               )}
               <Link
                 href="/cart"

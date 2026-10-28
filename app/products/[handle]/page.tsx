@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import FavoriteButton from "@/app/components/favorite-button";
+import ProductGallery from "@/app/components/product-gallery";
 import { getProductByHandle } from "@/lib/products";
 import { getSiteUrl } from "@/lib/site-url";
-import ProductGallery from "@/app/components/product-gallery";
 import VariantSelector from "./variant-selector";
 
 export const instant = false;
@@ -95,9 +96,12 @@ export default async function ProductPage({ params }: ProductPageProps) {
             {[product.vendor, product.productType].filter(Boolean).join(" · ")}
           </p>
 
-          <h1 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
-            {product.title}
-          </h1>
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
+              {product.title}
+            </h1>
+            <FavoriteButton productId={product.id} size="md" className="shrink-0" />
+          </div>
 
           <VariantSelector variants={product.variants} />
 

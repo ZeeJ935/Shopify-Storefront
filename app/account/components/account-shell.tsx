@@ -13,6 +13,11 @@ const NAV = [
     match: (p: string) => p.startsWith("/account/orders"),
   },
   {
+    href: "/account/favourites",
+    label: "Favourites",
+    match: (p: string) => p.startsWith("/account/favourites"),
+  },
+  {
     href: "/account/addresses",
     label: "Addresses",
     match: (p: string) => p.startsWith("/account/addresses"),

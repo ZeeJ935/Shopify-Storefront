@@ -360,5 +360,45 @@ export async function getProductByHandle(
   };
 }
 
+export async function getProductsByIds(
+  ids: string[],
+): Promise<ProductListItem[]> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return [];
+
+  // Storefront nodes() accepts limited batches; chunk to stay safe.
+  const chunkSize = 50;
+  const products: ProductListItem[] = [];
+
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const data = await shopifyFetch<{
+      nodes: (ProductNode | null)[];
+    }>(
+      `
+      query ProductsByIds($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on Product {
+            ${PRODUCT_CARD_FIELDS}
+          }
+        }
+      }
+    `,
+      { ids: chunk },
+      { revalidate: CATALOG_REVALIDATE },
+    );
+
+    for (const node of data.nodes) {
+      if (node && "handle" in node && node.handle) {
+        products.push(mapProductNode(node));
+      }
+    }
+  }
+
+  // Preserve favourite order
+  const byId = new Map(products.map((p) => [p.id, p]));
+  return unique.map((id) => byId.get(id)).filter(Boolean) as ProductListItem[];
+}
+
 export { PRODUCT_CARD_FIELDS };
 export type { ProductNode };

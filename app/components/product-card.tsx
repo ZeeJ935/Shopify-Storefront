@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import FavoriteButton from "@/app/components/favorite-button";
 import { salePercentOff, type ProductListItem } from "@/lib/products";
 import { primaryColorTag } from "@/lib/tag-classify";
 import { formatMoneyValue } from "@/lib/money";
@@ -69,6 +70,10 @@ export default function ProductCard({ product }: ProductCardProps) {
               No image
             </div>
           )}
+
+          <div className="absolute right-3 top-3 z-10">
+            <FavoriteButton productId={product.id} />
+          </div>
 
           <div className="absolute left-2 top-2 flex flex-col gap-1">
             {!inStock && (
