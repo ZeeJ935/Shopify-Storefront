@@ -1,5 +1,5 @@
-import { cacheLife } from "next/cache";
-import { CATALOG_REVALIDATE, shopifyFetch } from "./shopify";
+import { cacheLife, cacheTag } from "next/cache";
+import { CATALOG_REVALIDATE, CATALOG_TAG, shopifyFetch } from "./shopify";
 import { getCatalogSnapshot } from "./catalog-snapshot";
 import {
   preferredBrands,
@@ -291,6 +291,7 @@ export type NavCatalog = {
 export async function getNavCatalog(): Promise<NavCatalog> {
   "use cache";
   cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
 
   try {
     const [collections, typeProbe, snapshot] = await Promise.all([

@@ -97,7 +97,19 @@ Deploy on Vercel (or any Node host). Set the same env vars in the host, and add 
 
 Local Customer Account login needs an HTTPS callback that matches Admin (tunnel) unless you only test catalog/cart anonymously.
 
+## Instant catalog updates (webhooks)
+
+Catalog data is cached and refreshed every 2 minutes as a backup. Shopify webhooks make edits show within seconds:
+
+1. Shopify admin → **Settings → Notifications → Webhooks → Create webhook**. Format **JSON**, URL `https://<your-site>/api/webhooks/shopify`. Create one for each event:
+   - Product creation, Product update, Product deletion
+   - Collection creation, Collection update, Collection deletion
+   - Inventory level update
+2. Copy the signing secret shown on that page ("Your webhooks will be signed with …") into `SHOPIFY_WEBHOOK_SECRET` in Vercel, then redeploy.
+3. Edit a product in admin and reload its page. Delivery status for each webhook is shown in admin.
+
+The endpoint rejects unsigned requests (401) and refreshes all catalog data tagged `catalog` (`CATALOG_TAG` in `lib/shopify.ts`).
+
 ## Known gaps
 
-- Cart is not linked to the customer access token (buyer identity) yet
-- Some announcement / policy copy in `lib/site-content.ts` is demo placeholder
+- Demo content in `lib/site-content.ts` (flagged `demo: true`) is hidden until replaced with real links and copy

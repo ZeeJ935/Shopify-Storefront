@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { isSafeShopifyCheckoutUrl } from "../lib/checkout-url";
 import { formatMoney } from "../lib/money";
 import { safeReturnTo } from "../lib/favourites";
 import { createRateLimiter, isSameOrigin } from "../lib/rate-limit";
+import { verifyShopifyWebhook } from "../lib/shopify-webhook";
 import { mapProductNode, salePercentOff } from "../lib/products";
 
 const STORE = "zj-store-eer28nlk.myshopify.com";
@@ -200,6 +202,25 @@ testMoney();
 testSalePercent();
 testCompareAtComesFromCheapestVariant();
 testSafeReturnTo();
+function testShopifyWebhookSignature() {
+  const secret = "test-secret";
+  const body = '{"id":1,"title":"Shoe"}';
+  const sign = (payload: string, key = secret) =>
+    createHmac("sha256", key).update(payload, "utf8").digest("base64");
+
+  assert.equal(verifyShopifyWebhook(body, sign(body), secret), true);
+  assert.equal(
+    verifyShopifyWebhook('{"id":1,"title":"Hacked"}', sign(body), secret),
+    false,
+    "tampered body",
+  );
+  assert.equal(verifyShopifyWebhook(body, sign(body, "wrong"), secret), false);
+  assert.equal(verifyShopifyWebhook(body, null, secret), false);
+  assert.equal(verifyShopifyWebhook(body, "c2hvcnQ=", secret), false, "short");
+  assert.equal(verifyShopifyWebhook(body, sign(body), ""), false, "no secret");
+}
+
 testRateLimiter();
 testSameOrigin();
+testShopifyWebhookSignature();
 console.log("audit-unit: all assertions passed");

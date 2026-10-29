@@ -1,11 +1,13 @@
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import ProductCard from "@/app/components/product-card";
 import { getProducts, type ProductListItem } from "@/lib/products";
+import { CATALOG_TAG } from "@/lib/shopify";
 
 // Kept here, not in lib/products: client components import that module.
 async function getCartRecommendations(): Promise<ProductListItem[]> {
   "use cache";
   cacheLife("hours");
+  cacheTag(CATALOG_TAG);
 
   const result = await getProducts({ first: 8, sortKey: "BEST_SELLING" });
   return result.products;

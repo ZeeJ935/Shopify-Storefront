@@ -1,6 +1,9 @@
 const storeDomain = process.env.SHOPIFY_STORE_DOMAIN?.trim();
 const storefrontToken = process.env.SHOPIFY_STOREFRONT_ACCESS_TOKEN?.trim();
 
+/** Cache tag on all catalog data (products, collections, search, menus). */
+export const CATALOG_TAG = "catalog";
+
 export type ShopifyFetchOptions = {
   /** Seconds. Omit or undefined keeps cache: "no-store" (cart / session). */
   revalidate?: number;
@@ -43,7 +46,9 @@ export async function shopifyFetch<T>(
         },
         body: JSON.stringify({ query, variables }),
         ...(useRevalidate
-          ? { next: { revalidate: options.revalidate } }
+          ? // Every cached Storefront query is catalog data; the tag lets the
+            // Shopify webhook route refresh it all at once.
+            { next: { revalidate: options.revalidate, tags: [CATALOG_TAG] } }
           : {
               cache: "no-store" as const,
               signal: AbortSignal.timeout(20_000),
@@ -79,5 +84,8 @@ export async function shopifyFetch<T>(
   return result.data;
 }
 
-/** Default revalidate window for catalog / homepage queries. */
+/**
+ * Default revalidate window for catalog / homepage queries. A backup only:
+ * Shopify webhooks (app/api/webhooks/shopify) refresh the catalog on change.
+ */
 export const CATALOG_REVALIDATE = 120;
