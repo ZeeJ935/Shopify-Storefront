@@ -1,4 +1,5 @@
 import { redirect, unstable_rethrow } from "next/navigation";
+import { connection } from "next/server";
 import { parseFavouriteIds } from "@/lib/favourites";
 import { getCustomerAccountDiscovery } from "./discovery";
 import {
@@ -96,6 +97,9 @@ export type MutationResult = {
 };
 
 async function requireAccessToken(returnTo: string): Promise<CustomerSession> {
+  // The expiry check (and discovery's cache) read Date.now(); mark this as
+  // request-time work so Cache Components doesn't try to prerender it.
+  await connection();
   const session = await getCustomerSession();
   if (!session) {
     // Bring the shopper back here after logging in again.
