@@ -3,7 +3,32 @@
 **Repository:** `zj-headless-storefront`  
 **Audit date:** 2026-10-28  
 **Scope:** Read-only inspection of the current codebase. No files were modified for this audit (this document is the deliverable).  
-**Verification note:** Claims marked **Verified** come from source inspection. Claims marked **Inferred** are reasoned from code/config but not runtime-proven. Shopify Admin settings, live production infra, and payment completion were **not** inspected in Admin / payment processors.
+**Verification note:** Claims marked **Verified** come from source inspection. Claims marked **Inferred** are reasoned from code/config but not runtime-proven. Shopify Admin settings, live production infra, and payment completion were **not** inspected in Admin / payment processors.  
+**Last updated:** 2026-10-29 — sections below are corrected for the changes listed in §0.
+
+---
+
+# 0. Changes since this audit (2026-10-29)
+
+| Area | Change | Where |
+|------|--------|-------|
+| Cart | Shared client cart (`CartProvider`): optimistic edits, one request per burst of quantity changes, serialized write queue, no route re-render after mutations | `app/components/cart-provider.tsx`, `app/cart/actions.ts` |
+| Cart | Slide-out drawer opens after “Add to cart” | `app/components/cart-drawer.tsx` |
+| Cart | Actions call one Shopify mutation and return the full cart (no pre-check `getCart`, no `revalidatePath`/`refresh`) | `app/cart/actions.ts`, `lib/cart.ts` |
+| Stock | `quantityAvailable` / `currentlyNotInStock` fetched; quantity capped to stock; Shopify cart `warnings` (`MERCHANDISE_NOT_ENOUGH_STOCK` / `OUT_OF_STOCK`) shown per line; checkout blocked on stock problems | `lib/stock.ts`, `lib/cart.ts` |
+| Buyer identity | Cart linked to the customer on login (`storefrontCustomerAccessTokenCreate` → `cartBuyerIdentityUpdate`); logout clears the cart cookie | `lib/customer-account/oauth.ts`, `app/account/logout/route.ts` |
+| Webhooks | Signed Shopify webhooks → `revalidateTag("catalog", { expire: 0 })`; all cached Storefront data tagged | `app/api/webhooks/shopify/route.ts`, `lib/shopify.ts` |
+| Proxy | `proxy.ts`: per-IP rate limiting (search, catalog, Server Actions), cross-site logout rejected, account return path forwarded | `proxy.ts`, `lib/rate-limit.ts` |
+| Errors | `app/error.tsx` + `app/global-error.tsx`; account actions show friendly messages; order API failures no longer shown as 404 | `app/`, `lib/customer-account/api.ts` |
+| Security | `safeReturnTo` resolves the URL (blocks `/\host`, tab/newline tricks); refresh route uses it | `lib/favourites.ts` |
+| Favourites | Failed load can no longer overwrite saved favourites; saves serialized and coalesced | `app/components/favorites-provider.tsx` |
+| Catalog | Sale “was” price taken from the cheapest variant; load-more retry | `lib/products.ts`, `app/collections/collection-browse.tsx` |
+| Account | Country dropdown from shop markets; newer/older order paging; truthful Placed → Paid → Shipped timeline | account pages |
+| SEO | `/account` and `/search` disallowed in robots; `noindex` metadata | `app/robots.ts`, layouts |
+| Content | Items flagged `demo` (placeholder links, unconfirmed promos) are hidden | `lib/site-content.ts` |
+| Tests | `scripts/audit-unit.ts` also covers sale price, return paths, rate limiter, origin check, webhook signatures | `scripts/audit-unit.ts` |
+
+Still open: policy pages, post-checkout thank-you, analytics/consent, Markets/i18n, variant option pickers, CI.
 
 ---
 
@@ -26,15 +51,17 @@ A **headless Shopify storefront** for “ZJ Store” (Nike/Adidas demo catalog).
 2. **Customer Account API** — discovery + GraphQL via `lib/customer-account/discovery.ts` / `api.ts`, OAuth 2.0 + PKCE confidential client (`lib/customer-account/oauth.ts`)
 3. **Shopify-hosted Checkout** — redirect to cart `checkoutUrl` (not a custom checkout)
 
-**Not used (verified by absence):** Admin GraphQL API, webhooks, Shopify Functions, Metaobjects API, Markets API, Hydrogen, Shopify app extensions, legacy Storefront customerAccessToken login.
+4. **Shopify admin webhooks** (added 2026-10-29) — product/collection/inventory events → `app/api/webhooks/shopify/route.ts`
+
+**Not used (verified by absence):** Admin GraphQL API, Shopify Functions, Metaobjects API, Markets API, Hydrogen, Shopify app extensions, legacy Storefront customerAccessToken login (password-based). The Storefront customer token used for cart buyer identity is issued via the Customer Account API, not password login.
 
 ## Customer journey (verified)
 
-Browse catalog → PDP → select variant → Server Action `addItem` → Shopify Cart API → httpOnly cart cookie → `/cart` → validated `checkoutUrl` → Shopify Checkout → payment/order on Shopify. Optional: login via CAA → account/orders/addresses/profile/favourites.
+Browse catalog → PDP → select variant → `CartProvider.addItem` → Server Action `addItem` → Shopify Cart API → httpOnly cart cookie → cart drawer / `/cart` → server-sanitized `checkoutUrl` → Shopify Checkout → payment/order on Shopify. Optional: login via CAA (cart linked to the customer) → account/orders/addresses/profile/favourites.
 
 ## Architectural quality
 
-Strong for a learning/portfolio headless storefront: clear `lib/` vs `app/` split, server-only secrets, cart recovery, checkout URL allowlisting, JSON-LD escaping, CAA with AES-GCM cookie sessions, favourites via customer metafield. Gaps vs large production shops: no buyer identity on cart, variant pagination caps, thin automated tests, no `error.tsx`, no Admin/webhooks/Markets.
+Strong for a learning/portfolio headless storefront: clear `lib/` vs `app/` split, server-only secrets, optimistic shared cart, stock-aware quantities, checkout URL allowlisting, JSON-LD escaping, CAA with AES-GCM cookie sessions and cart buyer identity, webhook-driven cache refresh, favourites via customer metafield. Remaining gaps vs large production shops: variant pagination caps, no CI/test runner, no Admin API app, no Markets.
 
 ## Portfolio / expertise level
 
@@ -42,13 +69,15 @@ This is a **viable, above-average Shopify headless portfolio project**. It demon
 
 ### Scores (out of 10)
 
+Scores updated 2026-10-29 where the original “why” cited gaps that are now closed.
+
 | Dimension | Score | Why |
 |-----------|------:|-----|
-| **Shopify expertise** | **8.0** | Storefront GraphQL, Cart API, filters/search, CAA OAuth/PKCE, metafields, checkout hardening — broad for a storefront repo. Missing Admin/webhooks/Functions/Markets. |
-| **Next.js / frontend** | **7.5** | App Router, RSC, Server Actions, Suspense for chrome, `"use cache"` nav, polished UI. Thin error boundaries; Cache Components still sharp-edge. |
-| **Architecture** | **8.0** | Clean boundaries; Shopify as SoT; no bogus customer DB. Cart↔customer not linked. |
-| **Security** | **7.5** | Tokens server-only; httpOnly cookies; checkout host validation; JSON-LD escape; returnTo sanitization. CAA token in Authorization header (Shopify pattern). No CSRF tokens on Server Actions (Next built-in origin checks — inferred). |
-| **Production readiness** | **6.5** | Core commerce + account work; metafield Admin dependency; buyer identity gap; test coverage thin; Markets/i18n absent. |
+| **Shopify expertise** | **8.5** (was 8.0) | Storefront GraphQL, Cart API incl. warnings + buyer identity, filters/search, CAA OAuth/PKCE, metafields, webhooks, checkout hardening. Missing Admin API app/Functions/Markets. |
+| **Next.js / frontend** | **8.0** (was 7.5) | App Router, RSC, Server Actions, Proxy, cache tags + `revalidateTag`, error boundaries, optimistic client cart. Cache Components still sharp-edge (`connection()` needed before `Date.now()`). |
+| **Architecture** | **8.5** (was 8.0) | Clean boundaries; Shopify as SoT; no bogus customer DB; cart linked to customer; event-driven cache invalidation. |
+| **Security** | **8.0** (was 7.5) | Tokens server-only; httpOnly cookies; checkout host validation; JSON-LD escape; hardened `returnTo`; signed webhooks; rate limiting; cross-site logout blocked. Rate limits are per instance (best effort). |
+| **Production readiness** | **7.5** (was 6.5) | Core commerce + account work; error pages; stock limits; webhooks. Still: metafield Admin dependency, no CI, no policy pages, Markets/i18n absent. |
 | **Portfolio value** | **8.5** | Rare combo of polished headless UX + CAA + security-conscious checkout — excellent interview talk track. |
 
 ---
@@ -60,8 +89,9 @@ This is a **viable, above-average Shopify headless portfolio project**. It demon
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  Browser                                                         │
-│  Product cards, VariantSelector, CartView, CheckoutButton,       │
-│  FavoritesProvider, SearchDrawer, Account forms                  │
+│  Product cards, VariantSelector, CartProvider, CartDrawer,       │
+│  CartView, CheckoutButton, FavoritesProvider, SearchDrawer,      │
+│  Account forms                                                   │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ HTTPS
                                 ▼
@@ -79,13 +109,14 @@ This is a **viable, above-average Shopify headless portfolio project**. It demon
 │  app/cart/actions.ts            /account/authorize|callback|…    │
 │  addresses/profile/favourites   /api/predictive-search           │
 │                                 /api/catalog                     │
+│                                 /api/webhooks/shopify  ◄─ Shopify│
 │                                 /cart/clear                      │
 │                                                                  │
 │  Cookies (httpOnly)                                              │
 │  shopify-cart-id            (lib/cart-cookie.ts)                 │
 │  zj-ca-session / zj-ca-id / zj-ca-pkce (AES-GCM sealed)          │
 │                                                                  │
-│  No middleware.ts found                                          │
+│  proxy.ts: rate limits · logout origin check · account returnTo  │
 └───────────────┬─────────────────────────────┬───────────────────┘
                 │                             │
                 ▼                             ▼
@@ -115,9 +146,10 @@ no ORM/DB client.
 
 - The **browser never holds the Storefront token** or CAA client secret.
 - **Catalog/cart GraphQL** goes through `shopifyFetch` on the server (or via Server Actions / Route Handlers that call `lib/*`).
-- **Checkout** leaves the Next app: client navigates to Shopify’s `checkoutUrl` after allowlist checks (`lib/checkout-url.ts`, `app/cart/checkout-button.tsx`, `app/cart/page.tsx`).
+- **Checkout** leaves the Next app: the server sanitizes `checkoutUrl` (`toClientCart` in `lib/cart.ts` using `lib/checkout-url.ts`); `CheckoutButton` saves pending cart edits, then navigates.
 - **Accounts** use Shopify as IdP; Next only stores sealed tokens in cookies.
-- **No `middleware.ts`** — auth gates are layout/loaders (`requireCustomerSession`, redirects in CAA fetch).
+- **`proxy.ts`** (Next 16’s Middleware) handles rate limits, the logout origin check and forwarding the current path for re-login; auth gates themselves stay in layouts/loaders (`requireCustomerSession`, redirects in CAA fetch).
+- **Shopify → Next:** signed webhooks call `/api/webhooks/shopify`, which clears the `catalog` cache tag.
 
 ---
 
@@ -127,24 +159,28 @@ no ORM/DB client.
 |------|----------------|------------|------------|
 | `app/` | Routes, UI, Server Actions, Route Handlers | `lib/*` | Appropriate App Router layout |
 | `app/components/` | Shared chrome (header, cards, favourites, toasts) | `lib`, actions | Clear; some large shells (`site-header-shell.tsx`) |
-| `app/cart/` | Cart page + mutations + checkout button | `lib/cart`, cookies | Strong commerce core |
+| `app/cart/` | Cart page + mutations + checkout button + shared line item | `lib/cart`, cookies | Strong commerce core |
+| `app/components/cart-provider.tsx`, `cart-drawer.tsx` | Shared client cart (optimistic, queued writes) + drawer | cart actions | Removes route re-renders on cart edits |
 | `app/account/` | Login, OAuth routes, protected account, favourites page | `lib/customer-account` | Mature for portfolio |
 | `app/collections/`, `products/`, `search/` | Catalog UX | `lib/collections`, `products`, `search`, `catalog-query` | Solid |
-| `app/api/` | Predictive search + catalog JSON for infinite browse | `lib/search`, catalog helpers | Thin BFF layer |
+| `app/api/` | Predictive search + catalog JSON for infinite browse + Shopify webhook receiver | `lib/search`, catalog helpers | Thin BFF layer |
 | `lib/shopify.ts` | Single Storefront HTTP client | env | Correct centralization |
 | `lib/cart.ts` | Cart GraphQL mutations/queries | `shopifyFetch` | Production-minded (userErrors, flatten lines) |
 | `lib/products.ts` / `collections.ts` / `search.ts` / `catalog*.ts` | Catalog domain | Storefront | Good mapping from connection edges |
 | `lib/customer-account/` | Config, discovery, PKCE, session crypto, GraphQL | env, cookies | High expertise signal |
 | `lib/checkout-url.ts` | Open-redirect defense | env hosts | Critical security piece |
-| `lib/favourites.ts` | Intent/sessionStorage helpers + metafield constants | client + server | Supports login return flows |
+| `lib/stock.ts` | Stock rules (limits, low stock, backorder, line issues) | — | Shared by PDP + cart |
+| `lib/rate-limit.ts`, `lib/shopify-webhook.ts` | Pure limiter + HMAC verification | `node:crypto` | Unit-tested |
+| `lib/localization.ts` | Shop markets for the address country list | Storefront | `"use cache"` (hours) |
+| `lib/favourites.ts` | Intent/sessionStorage helpers, `safeReturnTo`, metafield constants | client + server | Supports login return flows |
 | `lib/site-content.ts` | Marketing copy / nav intents | UI | Demo copy flagged in-file |
 | `docs/` | Admin setup + this audit | humans | Useful |
 | `scripts/` | Manual cart smoke + unit asserts | `lib` | Not wired into `npm test` |
 | `public/` | Static assets | — | Standard |
 | `.env.example` | Env contract | deploy | Good; secrets gitignored |
 | `next.config.ts` | `cacheComponents`, images CDN, Tailwind turbopack | Next 16 | Modern; implications for `/_not-found` |
-| **No** `middleware.ts` | — | — | Verified absent |
-| **No** `error.tsx` / `global-error.tsx` | — | — | Gap |
+| `proxy.ts` | Rate limits, logout origin check, account return path | `lib/rate-limit.ts` | Added 2026-10-29 |
+| `app/error.tsx` / `app/global-error.tsx` | Branded error pages with retry | — | Added 2026-10-29 |
 | **No** GraphQL codegen folder | Inline strings in `lib/` | — | Acceptable at this size; less type-gen safety |
 
 Separation of Shopify I/O in `lib/` with UI in `app/` is **appropriate** and interview-friendly.
@@ -167,13 +203,17 @@ Separation of Shopify I/O in `lib/` with UI in `app/` is **appropriate** and int
 | Nav catalog | `lib/catalog.ts` | `getNavCatalog` | Storefront (probes + snapshot) | Header/footer | Server | `"use cache"` + `cacheLife("minutes")` | Server |
 | Predictive search | `lib/search.ts` + `app/api/predictive-search/route.ts` | `predictiveSearch` | Storefront `predictiveSearch` | Search drawer | Server (API) | `revalidate: 60` | No token to client |
 | Product search | `lib/search.ts` | `searchProducts` | Storefront `search` | `/search` | Server | catalog revalidate | Server |
-| Cart create | `lib/cart.ts` | `createCart` | `cartCreate` | New cart | Server Action path | **no-store** | Cookie set httpOnly |
-| Cart lines add | `lib/cart.ts` | `addToCart` | `cartLinesAdd` | ATC | Server | no-store | Validates merchandiseId |
-| Cart get | `lib/cart.ts` | `getCart` | `cart(id)` | Cart page / header qty | Server | no-store | Cookie id |
-| Cart lines update/remove | `lib/cart.ts` | `updateCartLine` / `removeCartLine` | mutations | Cart UI | Server | no-store | Server |
+| Cart create | `lib/cart.ts` | `createCart(lines, customerAccessToken?)` | `cartCreate` (lines + `buyerIdentity` in one call) | New cart | Server Action path | **no-store** | Cookie set httpOnly |
+| Cart lines add | `lib/cart.ts` | `addToCart` | `cartLinesAdd` (+ `warnings`) | ATC | Server | no-store | Validates merchandiseId |
+| Cart get | `lib/cart.ts` | `getCart` | `cart(id)` (+ stock fields, `updatedAt`) | Cart page / drawer / header qty | Server | no-store | Cookie id |
+| Cart lines update/remove | `lib/cart.ts` | `updateCartLines` (batched) / `removeCartLine` | mutations (+ `warnings`) | Cart UI | Server | no-store | Server |
+| Cart buyer identity | `lib/cart.ts` | `linkCartToCustomer` | `cartBuyerIdentityUpdate` | Link cart on login | Route Handler (callback) | no-store | Storefront customer token from CAA |
 | Discount codes | `lib/cart.ts` | `updateCartDiscountCodes` | `cartDiscountCodesUpdate` | Cart discounts | Server | no-store | Length limits in actions |
-| Checkout URL | cart fields → UI | — | Cart `checkoutUrl` | Leave to Shopify | Server fetch; client redirect | — | Host allowlist |
+| Checkout URL | cart fields → UI | `toClientCart` | Cart `checkoutUrl` | Leave to Shopify | Sanitized on server; client redirect | — | Host allowlist |
+| Shop markets | `lib/localization.ts` | `getShippingCountries` | `localization.availableCountries` | Address country list | Server | `"use cache"` hours | Server |
 | CAA OAuth authorize/token | `lib/customer-account/oauth.ts` | `begin/completeCustomerAuthorization` | OpenID + token | Login | Route Handlers | — | PKCE + confidential secret |
+| Storefront customer token | `lib/customer-account/oauth.ts` | `createStorefrontCustomerToken` | CAA `storefrontCustomerAccessTokenCreate` | Cart buyer identity | Route Handler (callback) | no-store | Sealed in session cookie |
+| Catalog webhooks | `app/api/webhooks/shopify/route.ts` | `POST` | Shopify admin webhooks → `revalidateTag` | Instant catalog refresh | Route Handler | — | HMAC-SHA256 verified |
 | Customer profile | `lib/customer-account/api.ts` | `getCustomerProfile` | CAA GraphQL | Account shell | Server | no-store | Session cookie |
 | Orders list/detail | `api.ts` | order queries | CAA | `/account/orders` | Server | no-store | Session |
 | Addresses CRUD | `api.ts` | create/update/delete | CAA | Addresses UI | Server | no-store | Session |
@@ -196,7 +236,7 @@ Separation of Shopify I/O in `lib/` with UI in `app/` is **appropriate** and int
 | Errors | HTTP fail → throw; GraphQL `errors` → throw; missing `data` → throw. Message strings are generic (limited leak) |
 | Timeout | `AbortSignal.timeout(20_000)` **only** on uncached (`cache: "no-store"`) requests |
 | Retries | **None** |
-| Caching | Catalog: `next: { revalidate: CATALOG_REVALIDATE }` (120s). Cart: `cache: "no-store"` |
+| Caching | Catalog: `next: { revalidate: CATALOG_REVALIDATE, tags: ["catalog"] }` (120s backup; webhooks clear the tag). Cart: `cache: "no-store"` |
 | Fragments | Shared field strings (`PRODUCT_CARD_FIELDS`, `VARIANT_FIELDS`, `cartFields`) — not GraphQL fragment documents |
 | Types | Hand-written TS types; `as` casts on JSON parse — no codegen |
 
@@ -230,8 +270,8 @@ VariantSelector (client) receives variants[]
 - **Handles:** URL `/products/[handle]`; missing product → `notFound()`.
 - **IDs:** Shopify GIDs (`id` on product/variant) used for favourites and cart merchandise.
 - **Images:** `featuredImage` + `images(first: 4)` cards / `first: 12` PDP; CDN via `next.config.ts` `cdn.shopify.com`.
-- **Prices:** `priceRange.minVariantPrice` for cards; variant `price` / `compareAtPrice` for PDP/sale % (`salePercentOff`).
-- **Availability:** `availableForSale` on product and variants — **not** `quantityAvailable` / inventory policy (verified absent).
+- **Prices:** `priceRange.minVariantPrice` for cards, with the “was” price taken from the cheapest variant; variant `price` / `compareAtPrice` for PDP/sale % (`salePercentOff`).
+- **Availability:** `availableForSale` on product and variants; the PDP and cart also read `quantityAvailable` and `currentlyNotInStock` (backorder) via `lib/stock.ts`.
 - **Pagination:** Connection `pageInfo` / `after` on products, collections, search; catalog browse loads more via `/api/catalog` (client).
 - **Filtering:** Shopify `ProductFilter` inputs from collection `filters` + URL params (`collection-filters.tsx`, `catalog-query.ts`).
 - **Currency:** Shopify money objects; display via `Intl` + `currencyDisplay: "code"` (`lib/money.ts`) — single-market display, not Markets-aware.
@@ -242,9 +282,9 @@ VariantSelector (client) receives variants[]
 |-------|----------|-------|
 | Variants capped at **30** (cards) / **100** (PDP) with **no `pageInfo` pagination** | Medium | Products with >100 variants can miss SKUs |
 | Images capped (4/12) | Low | Fine for most apparel |
-| No inventory quantity UI | Low–Med | Stock truth is boolean `availableForSale` only |
-| Catalog revalidate 120s | Info | Stale prices/availability window |
-| Demo marketing copy | Info | `lib/site-content.ts` |
+| PDP stock cached up to 120s if a webhook is missed | Info | Shopify cart warnings still enforce the real limit |
+| Variants that oversell with stock left are capped at that stock | Info | Storefront API doesn’t expose the inventory policy while stock > 0 |
+| Demo marketing copy | Info | Flagged `demo` in `lib/site-content.ts` and hidden |
 
 **Robust for a real mid-size apparel catalog?** **Mostly yes** for Nike/Adidas-style variant counts. **Not** robust for highly configurable products with huge variant matrices without variant pagination.
 
@@ -263,7 +303,7 @@ VariantSelector (client) — listbox; defaults to first available
    ↓
 selectedVariant.id  (ProductVariant GID)
    ↓
-addItem(variantId, quantity)  // app/cart/actions.ts
+useCart().addItem → addItem(variantId, quantity)  // app/cart/actions.ts
    ↓
 addToCart(cartId, merchandiseId, quantity)  // merchandiseId = variant GID
    ↓
@@ -276,7 +316,8 @@ cartLinesAdd(lines: [{ merchandiseId, quantity }])
 
 - No hardcoded “first variant only” ATC on PDP (selector required).
 - Sold-out variants labeled; cannot add if `availableForSale !== true`.
-- Quantity clamped 1–99 in actions and cart helpers.
+- Quantity clamped 1–99 in actions and cart helpers, and to available stock minus what’s already in the bag on the PDP.
+- Single-variant products (“Default Title”) show no variant picker.
 - **Client/server:** prices shown from server-fetched props; ATC re-validates on Shopify (userErrors).
 - **Gap:** no option-axis UI (Size/Color matrices) — flat variant title list; fine for many catalogs, weaker UX for complex options.
 
@@ -295,28 +336,36 @@ missing → empty state
   ↓
 present → getCart(cartId)  // no-store
   ↓
-null cart → treat as empty / clear path via /cart/clear
+null cart → /cart/clear clears the cookie
+  ↓
+CartView seeds CartProvider (useSeededCart) — newer client cart wins by `updatedAt`
 ```
 
-Header quantity: `SiteHeader` reads cookie + `getCart` (inside Suspense).
+Header quantity: `SiteHeader` server-renders the count; once `CartProvider` holds a cart, the header shows the live count (the layout isn’t re-rendered on soft navigation).
 
 ## Add to cart (verified)
 
 ```text
-VariantSelector → addItem(variantId, qty)
+VariantSelector → useCart().addItem(variantId, qty)
+  ↓ (queued; one write at a time)
+Server Action addItem
   ↓
-existing cookie? getCart
+cookie? → cartLinesAdd   |   none / invalid cart → cartCreate(lines, buyerIdentity?) + set cookie
   ↓
-addToCart OR on invalid cart → createCart + addToCart + set cookie
+returns full cart + stock notices (from Shopify `warnings`)
   ↓
-revalidatePath("/cart"); refresh()
+CartProvider commits the cart; drawer opens
 ```
+
+No `revalidatePath` / `refresh()`: the client already has the fresh cart, so mutations don’t re-render the route.
 
 ## Updates
 
-- Quantity / remove / discount codes via Server Actions in `app/cart/actions.ts`.
-- `userErrors` surfaced as thrown errors → user-facing generic messages.
-- Loading: `useTransition` + delayed pending labels.
+- **Quantity:** applied on screen immediately; edits within 350 ms are batched into one `cartLinesUpdate`. Line totals and subtotal are computed client-side until Shopify confirms; discount-dependent totals show a small spinner.
+- **Queue:** all cart writes run one at a time, so rapid changes can’t race.
+- **Failure:** the edit is rolled back and the line shows the error. A gone cart (`cartGone`) empties the client cart and shows a toast.
+- **Stock:** quantities are capped to available stock; Shopify’s `MERCHANDISE_NOT_ENOUGH_STOCK` / `OUT_OF_STOCK` warnings appear as line notices, and Shopify’s saved quantity always wins.
+- **Checkout:** `CheckoutButton` flushes pending edits before redirecting, and is blocked while any line is sold out or over stock.
 - Stale/expired cart: `isInvalidCartError` heuristics → recreate cart on add; `/cart/clear` clears cookie.
 
 ## Persistence (verified)
@@ -330,7 +379,9 @@ revalidatePath("/cart"); refresh()
 | maxAge | 30 days |
 | secure | production (`NODE_ENV === "production"`) |
 
-**Weaknesses:** Cart not associated with logged-in customer (`buyerIdentity` / customer access token **absent** — verified). Multi-device carts won’t merge. Cookie secure flag tied to `NODE_ENV` only (CAA cookies also check `VERCEL`) — minor inconsistency.
+**Buyer identity:** linked on login and on carts created while signed in (see §10). Logout clears the cart cookie.
+
+**Weaknesses:** Multi-device carts won’t merge (the cart lives in one browser’s cookie). Cookie secure flag tied to `NODE_ENV` only (CAA cookies also check `VERCEL`) — minor inconsistency.
 
 ---
 
@@ -339,13 +390,13 @@ revalidatePath("/cart"); refresh()
 ## Flow (verified)
 
 ```text
-getCart → checkoutUrl
+getCart / cart mutation → checkoutUrl
   ↓
-app/cart/page.tsx: isSafeShopifyCheckoutUrl(checkoutUrl, allowedHosts)
+toClientCart: isSafeShopifyCheckoutUrl(checkoutUrl, allowedHosts) — unsafe URL blanked on the server
   ↓
-CartView → CheckoutButton
+CartView / CartDrawer → CheckoutButton (requires https; blocked on stock issues)
   ↓
-Client re-check isSafeShopifyCheckoutUrl
+await flush()  // pending quantity edits saved first
   ↓
 window.location.assign(checkoutUrl)
   ↓
@@ -383,13 +434,15 @@ Contrary to a “accounts not built” checklist: this repo has a full **Custome
 | Orders + detail | CAA queries | `api.ts`, orders pages |
 | Addresses CRUD | CAA mutations | addresses actions + UI |
 | Profile | CAA update | profile page |
-| Favourites | Metafield `custom.favourites` JSON | `api.ts`, FavoritesProvider |
+| Favourites | Metafield `custom.favourites` JSON; saves serialized; never overwrites a list that failed to load | `api.ts`, FavoritesProvider |
+| Cart buyer identity | Storefront customer token from `storefrontCustomerAccessTokenCreate`, applied via `cartBuyerIdentityUpdate` on login and `buyerIdentity` on new carts | `oauth.ts`, `lib/cart.ts`, `app/cart/actions.ts` |
+| Re-login return | Expired/missing session → `/account/authorize?returnTo=<current page>` | `api.ts`, `require-session.ts`, `proxy.ts` |
 | Legacy Storefront customerAccessToken | **Not present** | grep-negative |
 | Prisma/Postgres | **Not present / not needed** for customers/orders | package.json |
 
 **Prisma would not be required** to show orders — Shopify remains source of truth. A DB would only be justified for app-owned data Shopify shouldn’t store (e.g. heavy analytics, non-metafield app state).
 
-**Gap:** Cart **buyer identity** not attached after login — logged-in checkout may not auto-associate customer (verified absent).
+**Buyer identity (closed 2026-10-29):** the cart is linked to the customer after login, so checkout is tied to their account. Linking is best effort and never blocks login. **Inferred:** relies on Shopify issuing the Storefront customer token for this shop; failures are logged.
 
 ---
 
@@ -403,13 +456,16 @@ Contrary to a “accounts not built” checklist: this repo has a full **Custome
 | Session cookies AES-256-GCM sealed | — (good) | `session.ts` |
 | Checkout URL allowlist | — (good) | Previous open-redirect class issue **addressed** in current code |
 | JSON-LD `<` escaped to `\u003c` | — (good) | `products/[handle]/page.tsx` — prior XSS class **addressed** |
-| OAuth `returnTo` sanitized | — (good) | `safeReturnTo` in `lib/favourites.ts` |
+| OAuth `returnTo` sanitized | — (good) | `safeReturnTo` in `lib/favourites.ts` resolves the URL and requires the same origin (blocks `//host`, `/\host`, tab/newline tricks); used by login **and** `/account/refresh` (the refresh route previously only checked `startsWith("/")` — fixed 2026-10-29) |
+| Rate limiting | — (good, best effort) | `proxy.ts` + `lib/rate-limit.ts`: 60/min search and catalog, 120/min Server Actions, per IP; in-memory per server instance |
+| Logout CSRF | — (good) | `proxy.ts` rejects `POST /account/logout` without a same-origin `Origin` (403) |
+| Webhook authenticity | — (good) | HMAC-SHA256 over the raw body, `timingSafeEqual` (`lib/shopify-webhook.ts`) |
 | Server Action CSRF | INFORMATIONAL | Relies on Next.js Server Action origin checks (**inferred**, not re-proven here) |
-| GraphQL errors may include Shopify messages in CAA path | LOW | `customerAccountFetch` concatenates GraphQL error messages |
+| Shopify error text in UI | — (good) | Account actions log API detail and show a generic message; Shopify `userErrors` (validation) still shown |
 | Favourites product IDs in sessionStorage intent | LOW | Same-origin; not secret |
 | No security headers config in `next.config.ts` | LOW | CSP/HSTS typically at Vercel/CDN — **not verified** in repo |
-| Account routes not in robots `disallow` | LOW | Only `/cart`, `/api/` disallowed — account pages may be crawlable if linked while logged-out redirects |
-| Logging | INFORMATIONAL | Some `console.error` on authorize failures |
+| Account/search crawlability | — (good) | `/account` and `/search` disallowed in robots; `noindex` metadata |
+| Logging | INFORMATIONAL | `console.error` on authorize, account and webhook failures |
 
 **CRITICAL / HIGH:** None verified in current code for the classic checkout redirect / JSON-LD breakout issues — both appear fixed.
 
@@ -422,14 +478,15 @@ Contrary to a “accounts not built” checklist: this repo has a full **Custome
 | Server Components | Default for pages/layouts |
 | Client Components | Interactive cart, variants, filters, favourites, header |
 | Server Actions | Cart, addresses, profile, favourites |
-| Route Handlers | OAuth, search API, cart clear |
-| Suspense | Header/footer chrome (`site-shell.tsx`) |
-| Cache Components | `cacheComponents: true` in `next.config.ts` |
-| `"use cache"` | `getNavCatalog` |
-| Metadata | Root + product/collection/search |
+| Route Handlers | OAuth, search API, catalog API, cart clear, Shopify webhooks |
+| Suspense | Header/footer chrome (`site-shell.tsx`), cart recommendations |
+| Cache Components | `cacheComponents: true` in `next.config.ts`; `connection()` before `Date.now()` in the CAA session check |
+| `"use cache"` | `getNavCatalog`, `getCartRecommendations`, `getShippingCountries` |
+| Cache tags | `catalog` on all cached Storefront fetches + `cacheTag`; cleared by `revalidateTag("catalog", { expire: 0 })` |
+| Metadata | Root + product/collection/search; `noindex` on account and search |
 | `not-found` | `app/not-found.tsx` |
-| `error.tsx` | **Missing** |
-| Middleware | **Missing** |
+| `error.tsx` | `app/error.tsx` + `app/global-error.tsx` (use `retry`) |
+| Proxy (Middleware) | `proxy.ts` — Node runtime |
 | Images | `next/image` + Shopify CDN remotePatterns |
 
 ## `/_not-found` prerender failure (explained, not fixed)
@@ -446,14 +503,17 @@ With **Cache Components**, Next prerenders a synthetic `/_not-found` route that 
 
 | Data | Strategy | Should be |
 |------|----------|-----------|
-| Catalog / PDP / collections | `revalidate: 120` | Cached with bounded staleness ✓ |
-| Nav catalog | `"use cache"` + `cacheLife("minutes")` | Cached ✓ |
+| Catalog / PDP / collections | `revalidate: 120` + tag `catalog` | Webhook-refreshed; timer is backup ✓ |
+| Nav catalog | `"use cache"` + `cacheLife("minutes")` + `cacheTag("catalog")` | Cached ✓ |
+| Cart recommendations | `"use cache"` hours + `cacheTag("catalog")`, streamed in Suspense | Never blocks the cart ✓ |
 | Predictive search | `revalidate: 60` | Short cache OK |
 | Cart | `no-store` | Always dynamic ✓ |
 | CAA | `no-store` | Always dynamic ✓ |
-| Header cart count | Per-request getCart | Correct; cost = extra Storefront call |
+| Header cart count | Server-rendered once, then live from `CartProvider` | No extra call per cart edit ✓ |
+| Cart edits | One mutation per batch; no route re-render | Down from ~5 Storefront calls per click ✓ |
+| PDP cart load | Only when the variant is low stock (≤ 5) | Avoids a cart call on most product views ✓ |
 
-**Risks:** Duplicate catalog fetches across layout/page (partially mitigated by cache); favourites `nodes` chunking; collection infinite scroll hits `/api/catalog`. No explicit `revalidateTag` webhook pipeline — catalog freshness is time-based only.
+**Risks:** Duplicate catalog fetches across layout/page (partially mitigated by cache); favourites `nodes` chunking; `inventory_levels/update` webhooks clear the whole catalog tag on every sale (fine at this size); the 120s timer can be raised once webhooks are confirmed in production.
 
 ---
 
@@ -466,7 +526,8 @@ With **Cache Components**, Next prerenders a synthetic `/_not-found` route that 
 | Collection metadata | Yes |
 | JSON-LD Product | Yes, escaped |
 | Sitemap | Dynamic products/collections (`app/sitemap.ts`) if `SITE_URL` set |
-| Robots | Allow `/`, disallow cart/api |
+| Robots | Allow `/`; disallow cart, api, account, search |
+| `noindex` | Account (`noindex, nofollow`), search (`noindex, follow`) |
 | Twitter card extras | Minimal / not elaborate |
 | Account/favourites in sitemap | Not added (good) |
 
@@ -483,12 +544,17 @@ With **Cache Components**, Next prerenders a synthetic `/_not-found` route that 
 | `userErrors` on cart | Thrown joined messages → caught → generic or recreate cart |
 | Null product | `notFound()` |
 | Unavailable variants | UI blocks ATC |
-| Null/expired cart | null handling + recreate / `/cart/clear` |
-| CAA 401 | Redirect refresh |
+| Null/expired cart | null handling + recreate / `/cart/clear`; `cartGone` empties the client cart |
+| Stock shortfall | Shopify caps the line; notice shown; checkout blocked until fixed |
+| CAA 401 / expiring token | Redirect to refresh; the redirect now escapes action `catch` blocks (`unstable_rethrow`) |
+| Account API failure | Generic message to the shopper; detail logged |
+| Order detail API failure | Error panel (malformed id → 404; outage no longer shown as 404) |
+| Catalog load-more failure | “Couldn’t load more products” + **Try again**; auto-load paused |
 | Favourites metafield denied | Friendly toast string in `app/favourites/actions.ts` |
-| Route-level React error | **No `error.tsx`** — weaker resilience |
+| Favourites load failure | Never saved over; reloaded before the next toggle |
+| Route-level React error | `app/error.tsx` (keeps header) / `app/global-error.tsx` |
 
-Graceful for cart commerce paths; weaker for unexpected RSC render throws.
+Graceful for commerce and account paths, including unexpected render errors.
 
 ---
 
@@ -496,7 +562,7 @@ Graceful for cart commerce paths; weaker for unexpected RSC render throws.
 
 | Artifact | Type | Touches Shopify? |
 |----------|------|------------------|
-| `scripts/audit-unit.ts` | Automated asserts (run via `npx tsx`) | No — checkout URL, money, sale % |
+| `scripts/audit-unit.ts` | Automated asserts (run via `npx tsx`) | No — checkout URL, money, sale %, cheapest-variant compare-at, `safeReturnTo` redirect payloads, rate limiter, origin check, webhook signatures |
 | `scripts/test-cart.ts` | Manual/integration smoke | **Yes** — create cart + add line (needs env + handle) |
 | `npm test` | **None** | — |
 | Playwright/Cypress | **None** | — |
@@ -512,14 +578,16 @@ Graceful for cart commerce paths; weaker for unexpected RSC render throws.
 |------|---------|
 | Catalog / PDP / variants / cart / checkout | Ready for demo / soft launch |
 | Account / orders / addresses / favourites | Ready if Admin CAA + metafield configured |
-| Secrets / redirects / cookies | Solid baseline |
-| Caching | Acceptable; no webhook invalidation |
-| Reliability | Good cart recovery; missing error boundaries |
-| SEO | MVP solid |
+| Secrets / redirects / cookies | Solid; rate limiting and signed webhooks added |
+| Caching | Webhook invalidation via cache tags; timer as backup |
+| Reliability | Good cart recovery; error boundaries; stock-aware cart |
+| SEO | MVP solid; private routes excluded |
 | Deploy | Vercel-oriented; `.env.example` complete; **no** `vercel.json` in repo |
-| Buyer identity / Markets / i18n | Not production-complete for multi-market brands |
+| Buyer identity | Done |
+| Markets / i18n | Not production-complete for multi-market brands |
+| Content | Policy pages, thank-you page, analytics/consent still missing |
 
-**Production-readiness score: 6.5 / 10** — shippable as a branded headless MVP with known Admin prerequisites; not yet “enterprise catalog” complete.
+**Production-readiness score: 7.5 / 10** (was 6.5) — shippable as a branded headless store once policy pages exist and webhooks are registered in Admin; not yet “enterprise catalog” complete (Markets, variant pagination, CI).
 
 ---
 
@@ -536,11 +604,14 @@ Graceful for cart commerce paths; weaker for unexpected RSC render throws.
 - Customer orders, addresses, profile  
 - Customer metafields for wishlist  
 - Awareness of Storefront connection pagination and variant limits  
+- Cart buyer identity from Customer Account login  
+- Cart `warnings` and inventory-aware quantities  
+- Webhooks with HMAC verification driving cache-tag revalidation  
+- Optimistic cart UX with serialized, batched mutations  
 
 ## Not demonstrated yet (verified absent)
 
 - Admin GraphQL API / custom apps  
-- Webhooks / event-driven revalidation  
 - Shopify Functions (discounts, shipping)  
 - Metaobjects as content model  
 - Markets / international pricing  
@@ -569,9 +640,9 @@ Graceful for cart commerce paths; weaker for unexpected RSC render throws.
 |------|------------------|------------------------|
 | Shopify Theme Developer | Low–Med | Little Liquid/theme Online Store 2.0 |
 | Shopify Frontend Developer | High | Theme sections; could add more OS2 familiarity |
-| Headless Shopify Developer | **Very high** | Markets, webhook revalidation, buyer identity |
+| Headless Shopify Developer | **Very high** | Markets, variant option pickers |
 | Shopify App Developer | Low | No Admin API app, OAuth app install, extensions |
-| Shopify Full-Stack Developer | Med–High | Add Admin/webhooks or lightweight app backend |
+| Shopify Full-Stack Developer | Med–High | Webhooks done; add Admin API or a lightweight app backend |
 | Shopify Solutions Engineer | High | Great demo architecture; add multi-market + integration story |
 
 ---
@@ -580,17 +651,11 @@ Graceful for cart commerce paths; weaker for unexpected RSC render throws.
 
 Ranked for **Shopify expertise signal**, not feature count.
 
-### Priority 1 — Cart buyer identity after login
-- **What:** Attach CAA customer to cart (`buyerIdentity` / related Cart APIs).  
-- **Why:** Closes the guest→member commerce gap interviewers probe.  
-- **Concept:** Authenticated cart / checkout association.  
-- **Difficulty:** Medium. **Admin:** mostly API. **Value:** Very high.
+### ~~Priority 1 — Cart buyer identity after login~~ — **Done (2026-10-29)**
+- Storefront customer token from `storefrontCustomerAccessTokenCreate`; `cartBuyerIdentityUpdate` on login, `buyerIdentity` on new carts.
 
-### Priority 2 — Webhook-driven catalog revalidation
-- **What:** App/webhook receiver → `revalidateTag` / path for products/collections.  
-- **Why:** Shows production cache invalidation literacy.  
-- **Concept:** Admin webhooks + Next cache.  
-- **Difficulty:** Medium. **Admin:** webhook registration. **Value:** High.
+### ~~Priority 2 — Webhook-driven catalog revalidation~~ — **Done (2026-10-29)**
+- Admin webhooks → `/api/webhooks/shopify` (HMAC verified) → `revalidateTag("catalog", { expire: 0 })`. Remaining step: register the webhooks in Admin and set `SHOPIFY_WEBHOOK_SECRET`.
 
 ### Priority 3 — Variant connection pagination / option UX
 - **What:** Paginate variants; Size/Color pickers from `selectedOptions`.  
@@ -609,14 +674,14 @@ Ranked for **Shopify expertise signal**, not feature count.
 
 | Idea | Worth it now? |
 |------|----------------|
-| Customer Account API | **Already done** — deepen with buyer identity |
+| Customer Account API | **Already done**, incl. buyer identity |
 | Customer orders | **Already done** |
 | Admin GraphQL | Yes if targeting app/full-stack roles |
-| Webhooks | **Yes** (Priority 2) |
+| Webhooks | **Done** (catalog revalidation) |
 | Functions | Optional; heavy for portfolio ROI |
-| Metaobjects | Nice for CMS story; medium value |
+| Metaobjects | Nice for CMS story; also a good source for policy/marketing content |
 | Markets | If multi-region narrative needed |
-| Advanced caching | Pair with webhooks |
+| Advanced caching | **Done** — cache tags + webhooks |
 | Search | **Already done** (predictive + search) |
 | Wishlist | **Already done** (metafield) |
 
@@ -632,17 +697,19 @@ Ranked for **Shopify expertise signal**, not feature count.
 
 **Browse products.** Home and collection routes call `shopifyFetch` against Storefront API 2026-10 with the server-side Storefront access token. Products arrive as GraphQL connections (edges/nodes). We map them into typed `ProductListItem`s with images, price range, tags, and a page of variants. Collections can apply Shopify’s `ProductFilter`s and sort keys; the UI syncs filters to the URL.
 
-**Select a variant.** On the PDP, `getProductByHandle` loads richer fields (up to 100 variants). `VariantSelector` is a client component: it picks an available variant GID and quantity.
+**Select a variant.** On the PDP, `getProductByHandle` loads richer fields (up to 100 variants, with `quantityAvailable`). `VariantSelector` is a client component: it picks an available variant GID and caps the quantity at what’s in stock minus what’s already in the bag, showing “Only N left” when low.
 
-**Add to Shopify cart.** Clicking add calls Server Action `addItem`. That reads httpOnly cookie `shopify-cart-id`. If missing or invalid, it `cartCreate`s, then `cartLinesAdd` with `merchandiseId` = variant GID. The cart id is stored httpOnly for 30 days. Cart mutations use `cache: "no-store"` so we never serve a stale cart from Next’s fetch cache.
+**Add to Shopify cart.** Clicking add goes through a client `CartProvider` that queues every cart write, then calls Server Action `addItem`. That reads httpOnly cookie `shopify-cart-id`. If missing or invalid, it `cartCreate`s with the line in one call (and the customer’s buyer identity if signed in); otherwise `cartLinesAdd` with `merchandiseId` = variant GID. The action returns the full cart plus any Shopify stock `warnings`, and the drawer opens. Cart calls use `cache: "no-store"`.
 
-**Cart persistence / update.** `/cart` loads the cart by id, shows lines, discounts, and costs from Shopify. Quantity/remove/discount Server Actions call `cartLinesUpdate` / `Remove` / `cartDiscountCodesUpdate`, then revalidate the cart path.
+**Cart persistence / update.** Quantity changes update the screen instantly; a burst of clicks becomes one `cartLinesUpdate`. Because each action returns the cart, nothing re-renders on the server. If Shopify saves less than asked (stock), its quantity wins and the line says why.
 
-**Checkout.** Shopify returns `checkoutUrl` on the cart. We validate it is HTTPS and on an allowlisted host (`checkout.shopify.com`, our myshopify domain, or `SITE_URL` host) on the server and again in `CheckoutButton` before `window.location.assign`. From that moment, **payment and order creation are 100% Shopify-hosted**. Next does not process cards.
+**Checkout.** Shopify returns `checkoutUrl` on the cart. The server only passes it to the browser if it’s HTTPS on an allowlisted host (`checkout.shopify.com`, our myshopify domain, or `SITE_URL` host). `CheckoutButton` saves any pending edits, refuses while a line is sold out or over stock, then `window.location.assign`s. From that moment, **payment and order creation are 100% Shopify-hosted**. Next does not process cards.
 
-**Login → Customer Account API → orders.** “Account” starts OAuth PKCE (`/account/authorize`): we store state/verifier/(returnTo) in an encrypted cookie, send the user to Shopify’s authorization endpoint, then `/account/callback` exchanges the code for tokens and seals them in `zj-ca-session`. Protected pages call Customer Account GraphQL with `Authorization: <access_token>` (not Bearer — per this integration). We load profile, orders, addresses, and can read/write `custom.favourites` JSON metafield for the wishlist. Login intents can return the user to the previous page and auto-favourite a product, or land on `/account/favourites`.
+**Login → Customer Account API → orders.** “Account” starts OAuth PKCE (`/account/authorize`): we store state/verifier/(returnTo) in an encrypted cookie, send the user to Shopify’s authorization endpoint, then `/account/callback` exchanges the code for tokens, exchanges those for a Storefront customer token, links the cart to the customer, and seals everything in `zj-ca-session`. Protected pages call Customer Account GraphQL with `Authorization: <access_token>` (not Bearer — per this integration). We load profile, orders, addresses, and can read/write `custom.favourites` JSON metafield for the wishlist.
 
-**What I would say about expertise:** This isn’t a theme — it’s a real headless commerce BFF pattern: Shopify owns commerce truth; Next owns UX, session glue, and security boundaries (tokens, checkout redirects, XSS-safe JSON-LD).
+**Keeping the catalog fresh.** All cached Storefront data is tagged `catalog`. Shopify admin webhooks POST product/collection/inventory changes to `/api/webhooks/shopify`; we verify the HMAC and call `revalidateTag("catalog", { expire: 0 })`, so edits show within seconds. A 2-minute timer remains as a backup.
+
+**What I would say about expertise:** This isn’t a theme — it’s a real headless commerce BFF pattern: Shopify owns commerce truth; Next owns UX, session glue, cache invalidation and security boundaries (tokens, checkout redirects, XSS-safe JSON-LD, signed webhooks, rate limits).
 
 ---
 
@@ -650,10 +717,10 @@ Ranked for **Shopify expertise signal**, not feature count.
 
 This repository is a **credible, interview-ready headless Shopify storefront** with unusually strong coverage for its size: Storefront catalog/cart/checkout **plus** Customer Account API, favourites metafields, and deliberate security fixes around checkout redirects and JSON-LD.
 
-It will convince most Shopify employers you understand **headless Storefront architecture**, not merely Liquid themes. To push from “strong portfolio MVP” to “production engineer / solutions lead,” prioritize **buyer identity**, **webhook revalidation**, and **tighter automated tests** — not a customer database.
+It will convince most Shopify employers you understand **headless Storefront architecture**, not merely Liquid themes. Buyer identity and webhook revalidation are now in place (2026-10-29). To push further toward “production engineer / solutions lead,” prioritize **CI with automated tests**, **variant option UX**, and **policy pages / Markets** — not a customer database.
 
 **Overall: ship it on the portfolio, demo the live checkout + account login, and prepare the interview narrative in §22.**
 
 ---
 
-*End of audit. Generated from repository inspection on 2026-10-28. Shopify Admin configuration and live payment rails were not directly verified.*
+*End of audit. Generated from repository inspection on 2026-10-28; updated 2026-10-29 for the changes in §0. Shopify Admin configuration and live payment rails were not directly verified.*
