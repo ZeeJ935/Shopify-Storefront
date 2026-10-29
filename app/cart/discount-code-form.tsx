@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
+import { useCart } from "@/app/components/cart-provider";
 import PendingButtonLabel from "@/app/components/pending-button-label";
 import Spinner from "@/app/components/spinner";
 import { useDelayedPending } from "@/app/hooks/use-delayed-pending";
-import { applyDiscountCode, removeDiscountCode } from "./actions";
 
 type DiscountCode = {
   code: string;
@@ -13,32 +13,19 @@ type DiscountCode = {
 
 type DiscountCodeFormProps = {
   discountCodes: DiscountCode[];
-  onPendingChange?: (pending: boolean) => void;
 };
 
 export default function DiscountCodeForm({
   discountCodes,
-  onPendingChange,
 }: DiscountCodeFormProps) {
+  const { applyDiscount, removeDiscount } = useCart();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [removingCode, setRemovingCode] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const showPending = useDelayedPending(isPending);
-  const onPendingChangeRef = useRef(onPendingChange);
 
   const applicableCodes = discountCodes.filter((item) => item.applicable);
-
-  useEffect(() => {
-    onPendingChangeRef.current = onPendingChange;
-  }, [onPendingChange]);
-
-  useEffect(() => {
-    onPendingChangeRef.current?.(isPending);
-    return () => {
-      onPendingChangeRef.current?.(false);
-    };
-  }, [isPending]);
 
   function handleApply() {
     const next = value.trim();
@@ -48,12 +35,12 @@ export default function DiscountCodeForm({
 
     setRemovingCode(null);
     startTransition(async () => {
-      const result = await applyDiscountCode(next);
-      if (result.ok) {
+      const result = await applyDiscount(next);
+      if (result.success) {
         setValue("");
         setError(null);
       } else {
-        setError(result.error);
+        setError(result.message);
       }
     });
   }
@@ -65,12 +52,8 @@ export default function DiscountCodeForm({
 
     setRemovingCode(code);
     startTransition(async () => {
-      const result = await removeDiscountCode(code);
-      if (!result.ok) {
-        setError(result.error);
-      } else {
-        setError(null);
-      }
+      const result = await removeDiscount(code);
+      setError(result.success ? null : result.message);
       setRemovingCode(null);
     });
   }

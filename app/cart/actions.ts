@@ -1,14 +1,15 @@
 "use server";
 
-import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import {
   addToCart,
   createCart,
   getCart,
   removeCartLine,
+  toClientCart,
   updateCartDiscountCodes,
-  updateCartLine,
+  updateCartLines,
+  type Cart,
 } from "@/lib/cart";
 import {
   CART_COOKIE,
@@ -19,19 +20,14 @@ import {
 const DISCOUNT_CODE_MAX_LENGTH = 50;
 const INVALID_DISCOUNT_MESSAGE =
   "This code isn't valid or doesn't apply to your cart.";
+const CART_GONE_MESSAGE =
+  "Your cart is no longer available. Add items from the store to start a new one.";
 
-type CartActionResult =
-  | { success: true; totalQuantity: number }
-  | { success: false; message: string };
+export type CartActionResult =
+  | { success: true; cart: Cart }
+  | { success: false; message: string; cartGone?: boolean };
 
-type DiscountActionResult = { ok: true } | { ok: false; error: string };
-
-type AddItemResult = CartActionResult;
-
-function afterCartMutation() {
-  revalidatePath("/cart");
-  refresh();
-}
+export type CartLineQuantity = { id: string; quantity: number };
 
 function isInvalidCartError(error: unknown): boolean {
   if (!(error instanceof Error)) {
@@ -65,38 +61,70 @@ function isInvalidCartError(error: unknown): boolean {
   );
 }
 
+function isValidQuantity(quantity: unknown): quantity is number {
+  return (
+    typeof quantity === "number" &&
+    Number.isInteger(quantity) &&
+    quantity >= 1 &&
+    quantity <= 99
+  );
+}
+
+async function readCartId() {
+  const cookieStore = await cookies();
+  return cookieStore.get(CART_COOKIE)?.value || null;
+}
+
+async function clearCartCookie() {
+  const cookieStore = await cookies();
+  cookieStore.set(CART_COOKIE, "", cartCookieClearOptions());
+}
+
+async function cartGone(): Promise<CartActionResult> {
+  await clearCartCookie();
+  return { success: false, message: CART_GONE_MESSAGE, cartGone: true };
+}
+
+function ok(cart: Cart): CartActionResult {
+  return { success: true, cart: toClientCart(cart) };
+}
+
+/** Read-only: the current cart for client hydration, or null when there is none. */
+export async function getCurrentCart(): Promise<Cart | null> {
+  const cartId = await readCartId();
+  if (!cartId) {
+    return null;
+  }
+
+  try {
+    const cart = await getCart(cartId);
+    return cart ? toClientCart(cart) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function createCartWithItem(
   variantId: string,
   quantity: number,
-): Promise<AddItemResult> {
-  const cart = await createCart();
-  const updatedCart = await addToCart(cart.id, variantId, quantity);
+): Promise<CartActionResult> {
+  const cart = await createCart([{ merchandiseId: variantId, quantity }]);
 
   const cookieStore = await cookies();
-  cookieStore.set(CART_COOKIE, updatedCart.id, cartCookieSetOptions());
+  cookieStore.set(CART_COOKIE, cart.id, cartCookieSetOptions());
 
-  afterCartMutation();
-
-  return {
-    success: true,
-    totalQuantity: updatedCart.totalQuantity,
-  };
+  return ok(cart);
 }
 
 export async function addItem(
   variantId: string,
   quantity: number,
-): Promise<AddItemResult> {
+): Promise<CartActionResult> {
   if (typeof variantId !== "string" || variantId.trim().length === 0) {
     return { success: false, message: "A product variant is required." };
   }
 
-  if (
-    typeof quantity !== "number" ||
-    !Number.isInteger(quantity) ||
-    quantity < 1 ||
-    quantity > 99
-  ) {
+  if (!isValidQuantity(quantity)) {
     return {
       success: false,
       message: "Quantity must be a whole number between 1 and 99.",
@@ -104,52 +132,19 @@ export async function addItem(
   }
 
   const trimmedVariantId = variantId.trim();
-  const cookieStore = await cookies();
-  const existingCartId = cookieStore.get(CART_COOKIE)?.value;
+  const existingCartId = await readCartId();
 
   if (existingCartId) {
-    let existingCart;
-
     try {
-      existingCart = await getCart(existingCartId);
-    } catch {
-      return {
-        success: false,
-        message: "Unable to load your cart. Please try again.",
-      };
-    }
-
-    if (existingCart) {
-      try {
-        const updatedCart = await addToCart(
-          existingCartId,
-          trimmedVariantId,
-          quantity,
-        );
-
-        afterCartMutation();
-
+      return ok(await addToCart(existingCartId, trimmedVariantId, quantity));
+    } catch (error) {
+      if (!isInvalidCartError(error)) {
         return {
-          success: true,
-          totalQuantity: updatedCart.totalQuantity,
+          success: false,
+          message: "Unable to update your cart. Please try again.",
         };
-      } catch (error) {
-        if (!isInvalidCartError(error)) {
-          return {
-            success: false,
-            message: "Unable to update your cart. Please try again.",
-          };
-        }
       }
-    }
-
-    try {
-      return await createCartWithItem(trimmedVariantId, quantity);
-    } catch {
-      return {
-        success: false,
-        message: "Unable to create a new cart. Please try again.",
-      };
+      // Stale cart: fall through and start a new one.
     }
   }
 
@@ -163,70 +158,18 @@ export async function addItem(
   }
 }
 
-async function clearCartCookie() {
-  const cookieStore = await cookies();
-  cookieStore.set(CART_COOKIE, "", cartCookieClearOptions());
-}
-
-async function getActiveCartId(): Promise<
-  | { ok: true; cartId: string }
-  | { ok: false; result: CartActionResult }
-> {
-  const cookieStore = await cookies();
-  const cartId = cookieStore.get(CART_COOKIE)?.value;
-
-  if (!cartId) {
-    return {
-      ok: false,
-      result: {
-        success: false,
-        message: "Your cart is empty. Add a product to get started.",
-      },
-    };
-  }
-
-  let cart;
-
-  try {
-    cart = await getCart(cartId);
-  } catch {
-    return {
-      ok: false,
-      result: {
-        success: false,
-        message: "Unable to load your cart. Please try again.",
-      },
-    };
-  }
-
-  if (!cart) {
-    await clearCartCookie();
-    return {
-      ok: false,
-      result: {
-        success: false,
-        message:
-          "Your cart is no longer available. Add items from the store to start a new one.",
-      },
-    };
-  }
-
-  return { ok: true, cartId };
-}
-
-export async function updateItem(
-  lineId: string,
-  quantity: number,
+export async function updateItems(
+  lines: CartLineQuantity[],
 ): Promise<CartActionResult> {
-  if (typeof lineId !== "string" || lineId.trim().length === 0) {
-    return { success: false, message: "A cart line is required." };
-  }
-
   if (
-    typeof quantity !== "number" ||
-    !Number.isInteger(quantity) ||
-    quantity < 1 ||
-    quantity > 99
+    !Array.isArray(lines) ||
+    lines.length === 0 ||
+    lines.some(
+      (line) =>
+        typeof line?.id !== "string" ||
+        line.id.trim().length === 0 ||
+        !isValidQuantity(line.quantity),
+    )
   ) {
     return {
       success: false,
@@ -234,28 +177,20 @@ export async function updateItem(
     };
   }
 
-  const activeCart = await getActiveCartId();
-  if (!activeCart.ok) {
-    return activeCart.result;
+  const cartId = await readCartId();
+  if (!cartId) {
+    return cartGone();
   }
 
   try {
-    const updatedCart = await updateCartLine(
-      activeCart.cartId,
-      lineId.trim(),
-      quantity,
-    );
-
-    afterCartMutation();
-
-    return {
-      success: true,
-      totalQuantity: updatedCart.totalQuantity,
-    };
-  } catch {
+    return ok(await updateCartLines(cartId, lines));
+  } catch (error) {
+    if (isInvalidCartError(error)) {
+      return cartGone();
+    }
     return {
       success: false,
-      message: "Unable to update this item. Please try again.",
+      message: "Unable to update your cart. Please try again.",
     };
   }
 }
@@ -265,24 +200,17 @@ export async function removeItem(lineId: string): Promise<CartActionResult> {
     return { success: false, message: "A cart line is required." };
   }
 
-  const activeCart = await getActiveCartId();
-  if (!activeCart.ok) {
-    return activeCart.result;
+  const cartId = await readCartId();
+  if (!cartId) {
+    return cartGone();
   }
 
   try {
-    const updatedCart = await removeCartLine(
-      activeCart.cartId,
-      lineId.trim(),
-    );
-
-    afterCartMutation();
-
-    return {
-      success: true,
-      totalQuantity: updatedCart.totalQuantity,
-    };
-  } catch {
+    return ok(await removeCartLine(cartId, lineId.trim()));
+  } catch (error) {
+    if (isInvalidCartError(error)) {
+      return cartGone();
+    }
     return {
       success: false,
       message: "Unable to remove this item. Please try again.",
@@ -329,142 +257,105 @@ function dedupeCodesCaseInsensitive(codes: string[]): string[] {
   return result;
 }
 
-async function getActiveCartForDiscount(): Promise<
-  | {
-      ok: true;
-      cartId: string;
-      discountCodes: { code: string; applicable: boolean }[];
-    }
-  | { ok: false; error: string }
-> {
-  const activeCart = await getActiveCartId();
-  if (!activeCart.ok) {
-    return {
-      ok: false,
-      error: activeCart.result.success
-        ? "Unable to load your cart. Please try again."
-        : activeCart.result.message,
-    };
-  }
-
-  let cart;
-
-  try {
-    cart = await getCart(activeCart.cartId);
-  } catch {
-    return { ok: false, error: "Unable to load your cart. Please try again." };
-  }
-
-  if (!cart) {
-    await clearCartCookie();
-    return {
-      ok: false,
-      error:
-        "Your cart is no longer available. Add items from the store to start a new one.",
-    };
-  }
-
-  return {
-    ok: true,
-    cartId: activeCart.cartId,
-    discountCodes: cart.discountCodes,
-  };
-}
-
-async function keepApplicableCodesOnly(
-  cartId: string,
-  discountCodes: { code: string; applicable: boolean }[],
-) {
-  const applicable = discountCodes
+function applicableCodes(cart: Cart) {
+  return cart.discountCodes
     .filter((item) => item.applicable)
     .map((item) => item.code);
-
-  return updateCartDiscountCodes(cartId, applicable);
 }
 
 export async function applyDiscountCode(
   code: string,
-): Promise<DiscountActionResult> {
+): Promise<CartActionResult> {
   const normalized = normalizeDiscountCodeInput(code);
   if (!normalized.ok) {
-    return normalized;
+    return { success: false, message: normalized.error };
   }
 
-  const active = await getActiveCartForDiscount();
-  if (!active.ok) {
-    return active;
+  const cartId = await readCartId();
+  if (!cartId) {
+    return cartGone();
   }
-
-  const existingApplicable = active.discountCodes.find(
-    (item) =>
-      item.applicable &&
-      item.code.toLowerCase() === normalized.code.toLowerCase(),
-  );
-
-  if (existingApplicable) {
-    afterCartMutation();
-    return { ok: true };
-  }
-
-  const nextCodes = dedupeCodesCaseInsensitive([
-    ...active.discountCodes
-      .filter((item) => item.applicable)
-      .map((item) => item.code),
-    normalized.code,
-  ]);
 
   try {
-    const updatedCart = await updateCartDiscountCodes(active.cartId, nextCodes);
+    // Shopify replaces the whole code list, so the current codes are needed.
+    const current = await getCart(cartId);
+    if (!current) {
+      return cartGone();
+    }
 
-    const applied = updatedCart.discountCodes.find(
-      (item) => item.code.toLowerCase() === normalized.code.toLowerCase(),
+    const key = normalized.code.toLowerCase();
+    const alreadyApplied = current.discountCodes.some(
+      (item) => item.applicable && item.code.toLowerCase() === key,
+    );
+    if (alreadyApplied) {
+      return ok(current);
+    }
+
+    const updated = await updateCartDiscountCodes(
+      cartId,
+      dedupeCodesCaseInsensitive([...applicableCodes(current), normalized.code]),
+    );
+
+    const applied = updated.discountCodes.find(
+      (item) => item.code.toLowerCase() === key,
     );
 
     if (!applied?.applicable) {
-      await keepApplicableCodesOnly(active.cartId, updatedCart.discountCodes);
-      afterCartMutation();
-      return { ok: false, error: INVALID_DISCOUNT_MESSAGE };
+      await updateCartDiscountCodes(cartId, applicableCodes(updated));
+      return { success: false, message: INVALID_DISCOUNT_MESSAGE };
     }
 
-    if (updatedCart.discountCodes.some((item) => !item.applicable)) {
-      await keepApplicableCodesOnly(active.cartId, updatedCart.discountCodes);
+    if (updated.discountCodes.some((item) => !item.applicable)) {
+      return ok(await updateCartDiscountCodes(cartId, applicableCodes(updated)));
     }
 
-    afterCartMutation();
-    return { ok: true };
-  } catch {
+    return ok(updated);
+  } catch (error) {
+    if (isInvalidCartError(error)) {
+      return cartGone();
+    }
     return {
-      ok: false,
-      error: "Unable to apply this discount code. Please try again.",
+      success: false,
+      message: "Unable to apply this discount code. Please try again.",
     };
   }
 }
 
 export async function removeDiscountCode(
   code: string,
-): Promise<DiscountActionResult> {
+  currentCodes: string[],
+): Promise<CartActionResult> {
   const normalized = normalizeDiscountCodeInput(code);
   if (!normalized.ok) {
-    return normalized;
+    return { success: false, message: normalized.error };
   }
 
-  const active = await getActiveCartForDiscount();
-  if (!active.ok) {
-    return active;
+  if (
+    !Array.isArray(currentCodes) ||
+    currentCodes.some((item) => typeof item !== "string")
+  ) {
+    return { success: false, message: "Unable to remove this discount code." };
   }
 
-  const nextCodes = active.discountCodes
-    .map((item) => item.code)
-    .filter((item) => item.toLowerCase() !== normalized.code.toLowerCase());
+  const cartId = await readCartId();
+  if (!cartId) {
+    return cartGone();
+  }
+
+  const key = normalized.code.toLowerCase();
+  const nextCodes = currentCodes
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && item.toLowerCase() !== key);
 
   try {
-    await updateCartDiscountCodes(active.cartId, nextCodes);
-    afterCartMutation();
-    return { ok: true };
-  } catch {
+    return ok(await updateCartDiscountCodes(cartId, nextCodes));
+  } catch (error) {
+    if (isInvalidCartError(error)) {
+      return cartGone();
+    }
     return {
-      ok: false,
-      error: "Unable to remove this discount code. Please try again.",
+      success: false,
+      message: "Unable to remove this discount code. Please try again.",
     };
   }
 }

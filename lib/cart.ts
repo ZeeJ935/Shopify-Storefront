@@ -1,3 +1,7 @@
+import {
+  getCheckoutAllowedHosts,
+  isSafeShopifyCheckoutUrl,
+} from "./checkout-url";
 import { shopifyFetch } from "./shopify";
 
 type Money = {
@@ -5,10 +9,14 @@ type Money = {
   currencyCode: string;
 };
 
-type ShopifyCart = {
+type CartLineInput = {
+  merchandiseId: string;
+  quantity: number;
+};
+
+type CartLineUpdateInput = {
   id: string;
-  checkoutUrl: string;
-  totalQuantity: number;
+  quantity: number;
 };
 
 type CartDiscountCode = {
@@ -57,6 +65,7 @@ type CartLineNode = {
 type CartQueryCart = {
   id: string;
   checkoutUrl: string;
+  updatedAt: string;
   totalQuantity: number;
   discountCodes: CartDiscountCode[];
   discountApplications: CartDiscountApplication[];
@@ -80,6 +89,7 @@ const moneyFields = `
 const cartFields = `
   id
   checkoutUrl
+  updatedAt
   totalQuantity
   discountCodes {
     code
@@ -180,6 +190,18 @@ function flattenCart(cart: CartQueryCart) {
   };
 }
 
+export type Cart = ReturnType<typeof flattenCart>;
+export type CartLine = Cart["lines"][number];
+
+/** Blanks an unsafe checkout URL before the cart is sent to the browser. */
+export function toClientCart(cart: Cart): Cart {
+  const safe = isSafeShopifyCheckoutUrl(
+    cart.checkoutUrl,
+    getCheckoutAllowedHosts(),
+  );
+  return safe ? cart : { ...cart, checkoutUrl: "" };
+}
+
 function assertNonEmptyId(value: string, label: string) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${label} is required.`);
@@ -197,25 +219,37 @@ function assertUpdateQuantity(quantity: number) {
   }
 }
 
-export async function createCart() {
+/** Creates a cart, optionally with initial lines, in a single request. */
+export async function createCart(lines: CartLineInput[] = []) {
+  for (const line of lines) {
+    assertNonEmptyId(line.merchandiseId, "Merchandise ID");
+    assertUpdateQuantity(line.quantity);
+  }
+
   const data = await shopifyFetch<{
     cartCreate: {
-      cart: ShopifyCart | null;
+      cart: CartQueryCart | null;
       userErrors: { message: string }[];
     };
   }>(
-    `mutation CartCreate {
-      cartCreate {
+    `mutation CartCreate($input: CartInput) {
+      cartCreate(input: $input) {
         cart {
-          id
-          checkoutUrl
-          totalQuantity
+          ${cartFields}
         }
         userErrors {
           message
         }
       }
     }`,
+    {
+      input: {
+        lines: lines.map((line) => ({
+          merchandiseId: line.merchandiseId.trim(),
+          quantity: line.quantity,
+        })),
+      },
+    },
   );
 
   const { cart, userErrors } = data.cartCreate;
@@ -228,7 +262,7 @@ export async function createCart() {
     throw new Error("Shopify did not return a cart.");
   }
 
-  return cart;
+  return flattenCart(cart);
 }
 
 export async function addToCart(
@@ -242,7 +276,7 @@ export async function addToCart(
 
   const data = await shopifyFetch<{
     cartLinesAdd: {
-      cart: ShopifyCart | null;
+      cart: CartQueryCart | null;
       userErrors: { message: string }[];
     };
   }>(
@@ -252,9 +286,7 @@ export async function addToCart(
     ) {
       cartLinesAdd(cartId: $cartId, lines: $lines) {
         cart {
-          id
-          checkoutUrl
-          totalQuantity
+          ${cartFields}
         }
         userErrors {
           message
@@ -282,7 +314,7 @@ export async function addToCart(
     throw new Error("Shopify did not return the updated cart.");
   }
 
-  return cart;
+  return flattenCart(cart);
 }
 
 export async function getCart(cartId: string) {
@@ -304,14 +336,21 @@ export async function getCart(cartId: string) {
   return flattenCart(data.cart);
 }
 
-export async function updateCartLine(
+/** Updates one or more line quantities in a single request. */
+export async function updateCartLines(
   cartId: string,
-  lineId: string,
-  quantity: number,
+  lines: CartLineUpdateInput[],
 ) {
   assertNonEmptyId(cartId, "Cart ID");
-  assertNonEmptyId(lineId, "Line ID");
-  assertUpdateQuantity(quantity);
+
+  if (lines.length === 0) {
+    throw new Error("At least one cart line is required.");
+  }
+
+  for (const line of lines) {
+    assertNonEmptyId(line.id, "Line ID");
+    assertUpdateQuantity(line.quantity);
+  }
 
   const data = await shopifyFetch<{
     cartLinesUpdate: {
@@ -334,12 +373,10 @@ export async function updateCartLine(
     }`,
     {
       cartId: cartId.trim(),
-      lines: [
-        {
-          id: lineId.trim(),
-          quantity,
-        },
-      ],
+      lines: lines.map((line) => ({
+        id: line.id.trim(),
+        quantity: line.quantity,
+      })),
     },
   );
 

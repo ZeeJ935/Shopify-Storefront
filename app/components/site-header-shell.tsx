@@ -16,6 +16,8 @@ import type {
   ResolvedNavLink,
 } from "@/lib/catalog";
 import { siteBrand } from "@/lib/site-content";
+import CartDrawer from "./cart-drawer";
+import { useCart } from "./cart-provider";
 import { useFavorites } from "./favorites-provider";
 import LogoutButton from "./logout-button";
 import SearchDrawer from "./search-drawer";
@@ -110,7 +112,7 @@ export default function SiteHeaderShell({
   productTypeTiles,
   hasTrending,
   hasSale,
-  cartQuantity,
+  cartQuantity: serverCartQuantity,
   shopName = siteBrand.name,
   isAuthenticated = false,
 }: SiteHeaderShellProps) {
@@ -119,6 +121,10 @@ export default function SiteHeaderShell({
     count: favCount,
     goToFavourites,
   } = useFavorites();
+  const { cart, status: cartStatus } = useCart();
+  // The header isn't re-rendered on soft navigation, so the live cart wins once loaded.
+  const cartQuantity =
+    cartStatus === "ready" ? (cart?.totalQuantity ?? 0) : serverCartQuantity;
   const [scrolled, setScrolled] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -577,6 +583,7 @@ export default function SiteHeaderShell({
       </header>
 
       <SearchDrawer open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <CartDrawer />
 
       {mobileOpen && (
         <div

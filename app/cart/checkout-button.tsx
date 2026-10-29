@@ -1,34 +1,44 @@
 "use client";
 
 import { useState } from "react";
+import { useCart } from "@/app/components/cart-provider";
 import PendingButtonLabel from "@/app/components/pending-button-label";
-import { isSafeShopifyCheckoutUrl } from "@/lib/checkout-url";
 
 type CheckoutButtonProps = {
+  /** Already host-checked on the server (`toClientCart`); blank when unsafe. */
   checkoutUrl: string;
-  allowedHost?: string | string[] | null;
 };
 
-export default function CheckoutButton({
-  checkoutUrl,
-  allowedHost,
-}: CheckoutButtonProps) {
+const UNAVAILABLE_MESSAGE =
+  "Checkout is unavailable right now. Please try again later.";
+
+export default function CheckoutButton({ checkoutUrl }: CheckoutButtonProps) {
+  const { flush } = useCart();
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const safe = isSafeShopifyCheckoutUrl(checkoutUrl, allowedHost);
+  const safe = checkoutUrl.startsWith("https://");
 
-  function handleClick() {
+  async function handleClick() {
     if (redirecting) {
       return;
     }
 
     if (!safe) {
-      setError("Checkout is unavailable right now. Please try again later.");
+      setError(UNAVAILABLE_MESSAGE);
       return;
     }
 
     setError(null);
     setRedirecting(true);
+
+    // Never send the shopper to checkout with quantities Shopify hasn't saved.
+    const saved = await flush();
+    if (!saved) {
+      setRedirecting(false);
+      setError("Your bag couldn't be updated. Please review it and try again.");
+      return;
+    }
+
     window.location.assign(checkoutUrl);
   }
 
@@ -49,8 +59,7 @@ export default function CheckoutButton({
       </button>
       {error || !safe ? (
         <p role="alert" className="mt-2 text-sm text-danger">
-          {error ??
-            "Checkout is unavailable right now. Please try again later."}
+          {error ?? UNAVAILABLE_MESSAGE}
         </p>
       ) : null}
     </div>

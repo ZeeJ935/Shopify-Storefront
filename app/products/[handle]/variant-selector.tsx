@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   useEffect,
   useId,
@@ -10,7 +9,7 @@ import {
   useTransition,
   type KeyboardEvent,
 } from "react";
-import { addItem } from "../../cart/actions";
+import { useCart } from "@/app/components/cart-provider";
 import PendingButtonLabel from "@/app/components/pending-button-label";
 import { useDelayedPending } from "@/app/hooks/use-delayed-pending";
 import { formatMoneyValue } from "@/lib/money";
@@ -34,6 +33,7 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
     firstAvailable?.id ?? variants[0]?.id ?? "",
   );
   const [quantity, setQuantity] = useState(1);
+  const { addItem } = useCart();
   const [isPending, startTransition] = useTransition();
   const showPending = useDelayedPending(isPending);
   const [feedback, setFeedback] = useState<{
@@ -214,9 +214,10 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
       const result = await addItem(selectedVariant.id, quantity);
 
       if (result.success) {
+        // The cart drawer opens with the item; this line is for screen readers.
         setFeedback({
           type: "success",
-          message: `Added to cart. Your cart now has ${result.totalQuantity} item${result.totalQuantity === 1 ? "" : "s"}.`,
+          message: `Added to cart. Your cart now has ${result.cart.totalQuantity} item${result.cart.totalQuantity === 1 ? "" : "s"}.`,
         });
       } else {
         setFeedback({
@@ -387,21 +388,11 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
       </button>
 
       <div role="status" aria-live="polite" className="min-h-5">
-        {feedback && (
-          <p
-            className={
-              feedback.type === "success"
-                ? "text-sm text-success"
-                : "text-sm text-danger"
-            }
-          >
-            {feedback.message}{" "}
-            {feedback.type === "success" && (
-              <Link href="/cart" className="underline">
-                View cart
-              </Link>
-            )}
-          </p>
+        {feedback?.type === "error" && (
+          <p className="text-sm text-danger">{feedback.message}</p>
+        )}
+        {feedback?.type === "success" && (
+          <p className="sr-only">{feedback.message}</p>
         )}
       </div>
     </div>
