@@ -5,18 +5,22 @@ import { getCustomerOrders } from "@/lib/customer-account/api";
 
 
 type OrdersPageProps = {
-  searchParams: Promise<{ after?: string }>;
+  searchParams: Promise<{ after?: string; before?: string }>;
 };
 
 export default async function AccountOrdersPage({
   searchParams,
 }: OrdersPageProps) {
-  const { after } = await searchParams;
+  const { after, before } = await searchParams;
 
   let orders;
   let pageInfo;
   try {
-    const result = await getCustomerOrders({ first: 10, after: after ?? null });
+    const result = await getCustomerOrders({
+      pageSize: 10,
+      after: before ? null : (after ?? null),
+      before: before ?? null,
+    });
     orders = result.orders;
     pageInfo = result.pageInfo;
   } catch (error) {
@@ -30,6 +34,12 @@ export default async function AccountOrdersPage({
       </div>
     );
   }
+
+  // Relay only guarantees hasPreviousPage when paging backward, so a page
+  // reached with `after` always has newer orders; with `before`, ask Shopify.
+  const showPrevious = before ? pageInfo.hasPreviousPage : Boolean(after);
+  // Paging backward means we came from an older page, so one always exists.
+  const showNext = before ? true : pageInfo.hasNextPage;
 
   return (
     <div className="space-y-6">
@@ -64,13 +74,27 @@ export default async function AccountOrdersPage({
         </ul>
       )}
 
-      {pageInfo.hasNextPage && pageInfo.endCursor ? (
-        <Link
-          href={`/account/orders?after=${encodeURIComponent(pageInfo.endCursor)}`}
-          className="btn btn-secondary"
-        >
-          Load more
-        </Link>
+      {showPrevious || showNext ? (
+        <nav aria-label="Orders pages" className="flex justify-between gap-3">
+          {showPrevious && pageInfo.startCursor ? (
+            <Link
+              href={`/account/orders?before=${encodeURIComponent(pageInfo.startCursor)}`}
+              className="btn btn-secondary"
+            >
+              ← Newer orders
+            </Link>
+          ) : (
+            <span />
+          )}
+          {showNext && pageInfo.endCursor ? (
+            <Link
+              href={`/account/orders?after=${encodeURIComponent(pageInfo.endCursor)}`}
+              className="btn btn-secondary"
+            >
+              Older orders →
+            </Link>
+          ) : null}
+        </nav>
       ) : null}
     </div>
   );

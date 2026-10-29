@@ -1,9 +1,12 @@
 "use client";
 
 import type { CustomerAddress } from "@/lib/customer-account/api";
+import type { ShippingCountry } from "@/lib/localization";
 
 type AddressFormProps = {
   address?: CustomerAddress | null;
+  /** The store's markets; empty falls back to a typed 2-letter code. */
+  countries?: ShippingCountry[];
   fieldErrors?: Record<string, string>;
   pending?: boolean;
   idPrefix?: string;
@@ -54,8 +57,58 @@ function Field({
   );
 }
 
+function CountryField({
+  id,
+  countries,
+  defaultValue,
+  error,
+}: {
+  id: string;
+  countries: ShippingCountry[];
+  defaultValue: string | null | undefined;
+  error?: string;
+}) {
+  const current = defaultValue?.toUpperCase() || "";
+  // Keep an existing address's country selectable even if the store no
+  // longer sells there, so editing never silently changes it.
+  const options =
+    current && !countries.some((country) => country.isoCode === current)
+      ? [...countries, { isoCode: current, name: current }]
+      : countries;
+
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-ink">
+        Country<span className="text-danger"> *</span>
+      </label>
+      <select
+        id={id}
+        name="countryCode"
+        defaultValue={current || options[0]?.isoCode}
+        required
+        autoComplete="country"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+        className={`field ${error ? "border-danger" : ""}`}
+      >
+        {options.map((country) => (
+          <option key={country.isoCode} value={country.isoCode}>
+            {country.name}
+          </option>
+        ))}
+      </select>
+      {error ? (
+        <p id={`${id}-error`} className="mt-1 text-xs text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function AddressForm({
   address,
+  countries = [],
   fieldErrors = {},
   pending = false,
   idPrefix = "address",
@@ -131,18 +184,27 @@ export default function AddressForm({
         />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          id={`${idPrefix}-countryCode`}
-          label="Country code"
-          name="countryCode"
-          defaultValue={address?.country ?? "US"}
-          error={fieldErrors.countryCode}
-          required
-          autoComplete="country"
-        />
+        {countries.length > 0 ? (
+          <CountryField
+            id={`${idPrefix}-countryCode`}
+            countries={countries}
+            defaultValue={address?.country}
+            error={fieldErrors.countryCode}
+          />
+        ) : (
+          <Field
+            id={`${idPrefix}-countryCode`}
+            label="Country code"
+            name="countryCode"
+            defaultValue={address?.country ?? "US"}
+            error={fieldErrors.countryCode}
+            required
+            autoComplete="country"
+          />
+        )}
         <Field
           id={`${idPrefix}-zoneCode`}
-          label="Province / state"
+          label="Province / state code (e.g. CA, ON, PB)"
           name="zoneCode"
           defaultValue={address?.province}
           error={fieldErrors.zoneCode}

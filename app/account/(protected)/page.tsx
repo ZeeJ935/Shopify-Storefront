@@ -19,7 +19,7 @@ export default async function AccountPage() {
   try {
     const [p, orderResult, addresses] = await Promise.all([
       getCustomerProfile(),
-      getCustomerOrders({ first: 3 }),
+      getCustomerOrders({ pageSize: 3 }),
       getCustomerAddresses().catch(() => []),
     ]);
     profile = p;

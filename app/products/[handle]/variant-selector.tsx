@@ -35,10 +35,6 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
   );
   const [quantity, setQuantity] = useState(1);
   const { addItem, cart, ensureLoaded } = useCart();
-
-  useEffect(() => {
-    ensureLoaded();
-  }, [ensureLoaded]);
   const [isPending, startTransition] = useTransition();
   const showPending = useDelayedPending(isPending);
   const [feedback, setFeedback] = useState<{
@@ -62,6 +58,10 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
   const hasAvailableVariant = variants.some(
     (variant) => variant.availableForSale,
   );
+  // Shopify names the only variant of an option-less product "Default Title".
+  const showPicker = !(
+    variants.length === 1 && variants[0].title === "Default Title"
+  );
   // What's already in the bag counts against stock. If the cart hasn't loaded
   // on this page yet, Shopify's cart warnings still cap the add.
   const inBag =
@@ -73,6 +73,16 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
     : 0;
   const addQuantity = Math.min(quantity, Math.max(1, remaining));
   const lowStock = selectedVariant ? lowStockCount(selectedVariant) : null;
+
+  // Only when stock is low can what's already in the bag noticeably cap this
+  // add, so only then is the cart worth a fetch. Otherwise Shopify's cart
+  // warnings still enforce the real limit.
+  const needsCart = lowStock !== null;
+  useEffect(() => {
+    if (needsCart) {
+      ensureLoaded();
+    }
+  }, [needsCart, ensureLoaded]);
   const allInBag =
     selectedVariant?.availableForSale === true && inBag > 0 && remaining === 0;
 
@@ -254,93 +264,97 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
   return (
     <div className="mt-8 space-y-5 overflow-visible">
       <div ref={containerRef} className="relative overflow-visible">
-        <span id={labelId} className="mb-2 block text-sm font-medium text-ink">
-          Select variant
-        </span>
+        {showPicker ? (
+          <>
+            <span id={labelId} className="mb-2 block text-sm font-medium text-ink">
+              Select variant
+            </span>
 
-        <button
-          ref={triggerRef}
-          type="button"
-          className="field flex w-full items-center justify-between gap-3 text-left"
-          aria-haspopup="listbox"
-          aria-expanded={isOpen}
-          aria-controls={listboxId}
-          aria-labelledby={labelId}
-          disabled={isPending}
-          onClick={() => {
-            if (isOpen) {
-              setIsOpen(false);
-            } else {
-              openListbox();
-            }
-          }}
-          onKeyDown={handleTriggerKeyDown}
-        >
-          <span className="min-w-0 truncate">
-            {selectedVariant ? variantLabel(selectedVariant) : "Select a variant"}
-          </span>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className={`h-4 w-4 shrink-0 text-steel transition ${isOpen ? "rotate-180" : ""}`}
-            aria-hidden="true"
-          >
-            <path
-              fillRule="evenodd"
-              d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
+            <button
+              ref={triggerRef}
+              type="button"
+              className="field flex w-full items-center justify-between gap-3 text-left"
+              aria-haspopup="listbox"
+              aria-expanded={isOpen}
+              aria-controls={listboxId}
+              aria-labelledby={labelId}
+              disabled={isPending}
+              onClick={() => {
+                if (isOpen) {
+                  setIsOpen(false);
+                } else {
+                  openListbox();
+                }
+              }}
+              onKeyDown={handleTriggerKeyDown}
+            >
+              <span className="min-w-0 truncate">
+                {selectedVariant ? variantLabel(selectedVariant) : "Select a variant"}
+              </span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className={`h-4 w-4 shrink-0 text-steel transition ${isOpen ? "rotate-180" : ""}`}
+                aria-hidden="true"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
 
-        {isOpen && (
-          <div
-            id={listboxId}
-            role="listbox"
-            aria-labelledby={labelId}
-            tabIndex={-1}
-            onKeyDown={handleListKeyDown}
-            className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-auto rounded border border-mist bg-snow py-1 shadow-[0_8px_24px_rgba(11,18,32,0.12)]"
-          >
-            {variants.map((variant, index) => {
-              const selected = variant.id === selectedVariantId;
-              const disabled = !variant.availableForSale;
-              const active = index === activeIndex;
+            {isOpen && (
+              <div
+                id={listboxId}
+                role="listbox"
+                aria-labelledby={labelId}
+                tabIndex={-1}
+                onKeyDown={handleListKeyDown}
+                className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-auto rounded border border-mist bg-snow py-1 shadow-[0_8px_24px_rgba(11,18,32,0.12)]"
+              >
+                {variants.map((variant, index) => {
+                  const selected = variant.id === selectedVariantId;
+                  const disabled = !variant.availableForSale;
+                  const active = index === activeIndex;
 
-              return (
-                <button
-                  key={variant.id}
-                  ref={(node) => {
-                    optionRefs.current[index] = node;
-                  }}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  aria-disabled={disabled || undefined}
-                  disabled={disabled}
-                  tabIndex={active ? 0 : -1}
-                  className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm ${
-                    disabled
-                      ? "cursor-not-allowed text-steel/70"
-                      : "text-ink hover:bg-mist/70"
-                  } ${active && !disabled ? "bg-mist/80" : ""} ${
-                    selected && !disabled ? "font-semibold" : "font-normal"
-                  }`}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => selectVariant(variant)}
-                >
-                  <span>{variantLabel(variant)}</span>
-                  {selected && !disabled ? (
-                    <span className="text-xs font-medium text-steel" aria-hidden="true">
-                      Selected
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        )}
+                  return (
+                    <button
+                      key={variant.id}
+                      ref={(node) => {
+                        optionRefs.current[index] = node;
+                      }}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      aria-disabled={disabled || undefined}
+                      disabled={disabled}
+                      tabIndex={active ? 0 : -1}
+                      className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm ${
+                        disabled
+                          ? "cursor-not-allowed text-steel/70"
+                          : "text-ink hover:bg-mist/70"
+                      } ${active && !disabled ? "bg-mist/80" : ""} ${
+                        selected && !disabled ? "font-semibold" : "font-normal"
+                      }`}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => selectVariant(variant)}
+                    >
+                      <span>{variantLabel(variant)}</span>
+                      {selected && !disabled ? (
+                        <span className="text-xs font-medium text-steel" aria-hidden="true">
+                          Selected
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : null}
 
         <p
           className={`mt-2 text-sm ${lowStock !== null ? "font-medium text-sale" : "text-steel"}`}

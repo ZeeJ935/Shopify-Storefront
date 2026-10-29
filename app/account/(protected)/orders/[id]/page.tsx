@@ -33,13 +33,13 @@ function timelineSteps(order: {
   const fulfilled = ["FULFILLED"].includes(
     (order.fulfillmentStatus || "").toUpperCase(),
   );
-  const delivered = fulfilled; // CAA has no separate delivered flag in our query
 
+  // No "Delivered" step: the query has no delivery signal, and marking it
+  // done on fulfilment would tell shoppers a parcel arrived when it only shipped.
   return [
     { label: "Placed", done: Boolean(order.processedAt) },
     { label: "Paid", done: paid },
-    { label: "Fulfilled", done: fulfilled },
-    { label: "Delivered", done: delivered },
+    { label: "Shipped", done: fulfilled },
   ];
 }
 

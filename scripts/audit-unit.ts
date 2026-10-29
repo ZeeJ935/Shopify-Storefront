@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { isSafeShopifyCheckoutUrl } from "../lib/checkout-url";
 import { formatMoney } from "../lib/money";
 import { safeReturnTo } from "../lib/favourites";
+import { createRateLimiter, isSameOrigin } from "../lib/rate-limit";
 import { mapProductNode, salePercentOff } from "../lib/products";
 
 const STORE = "zj-store-eer28nlk.myshopify.com";
@@ -163,9 +164,42 @@ function testSafeReturnTo() {
   assert.equal(safeReturnTo(null), "/account");
 }
 
+function testRateLimiter() {
+  const check = createRateLimiter();
+  const t0 = 1_000_000;
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal(check("ip", 3, 60_000, t0).allowed, true);
+  }
+  const blocked = check("ip", 3, 60_000, t0 + 1_000);
+  assert.equal(blocked.allowed, false);
+  assert.equal(blocked.retryAfterSeconds, 59);
+  // Other keys are counted separately.
+  assert.equal(check("other-ip", 3, 60_000, t0).allowed, true);
+  // A new window starts once the old one expires.
+  assert.equal(check("ip", 3, 60_000, t0 + 60_000).allowed, true);
+
+  // Memory stays bounded: a full table evicts rather than growing.
+  const small = createRateLimiter({ maxKeys: 2 });
+  small("a", 1, 60_000, t0);
+  small("b", 1, 60_000, t0);
+  small("c", 1, 60_000, t0);
+  assert.equal(small("a", 1, 60_000, t0).allowed, true, "evicted key restarts");
+}
+
+function testSameOrigin() {
+  const site = "https://shop.example";
+  assert.equal(isSameOrigin("https://shop.example", site), true);
+  assert.equal(isSameOrigin("https://evil.example", site), false);
+  assert.equal(isSameOrigin("http://shop.example", site), false);
+  assert.equal(isSameOrigin(null, site), false);
+  assert.equal(isSameOrigin("not a url", site), false);
+}
+
 testCheckoutUrl();
 testMoney();
 testSalePercent();
 testCompareAtComesFromCheapestVariant();
 testSafeReturnTo();
+testRateLimiter();
+testSameOrigin();
 console.log("audit-unit: all assertions passed");

@@ -106,7 +106,9 @@ function friendlyFavouritesError(message?: string) {
   if (/namespace and key on Metafields|not allowed/i.test(raw)) {
     return "Favourites aren’t set up in Shopify yet. In Admin, create a customer metafield custom.favourites (JSON) with Customer account access: Read and write.";
   }
-  return raw;
+  // Anything else is API detail: keep it in the server log, not the toast.
+  console.error("[favourites]", raw);
+  return "Could not save favourites. Please try again.";
 }
 
 export async function loadFavouriteProducts(

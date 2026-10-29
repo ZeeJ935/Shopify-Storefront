@@ -98,7 +98,8 @@ export type MutationResult = {
 async function requireAccessToken(returnTo: string): Promise<CustomerSession> {
   const session = await getCustomerSession();
   if (!session) {
-    redirect("/account/authorize");
+    // Bring the shopper back here after logging in again.
+    redirect(`/account/authorize?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
   if (isSessionExpiringSoon(session)) {
@@ -333,14 +334,24 @@ export async function getCustomerAddresses(): Promise<CustomerAddress[]> {
   return addresses.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 }
 
+export type OrdersPageInfo = {
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+  startCursor: string | null;
+  endCursor: string | null;
+};
+
+/** Pages forward with `after`, or backward with `before` (never both). */
 export async function getCustomerOrders(options?: {
-  first?: number;
+  pageSize?: number;
   after?: string | null;
+  before?: string | null;
 }): Promise<{
   orders: CustomerOrderSummary[];
-  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  pageInfo: OrdersPageInfo;
 }> {
-  const first = options?.first ?? 10;
+  const pageSize = options?.pageSize ?? 10;
+  const before = options?.before ?? null;
   const data = await customerAccountFetch<{
     customer: {
       orders: {
@@ -359,14 +370,21 @@ export async function getCustomerOrders(options?: {
             }[];
           };
         }[];
-        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        pageInfo: OrdersPageInfo;
       };
     };
   }>(
     `
-    query CustomerOrders($first: Int!, $after: String) {
+    query CustomerOrders($first: Int, $last: Int, $after: String, $before: String) {
       customer {
-        orders(first: $first, after: $after, sortKey: PROCESSED_AT, reverse: true) {
+        orders(
+          first: $first
+          last: $last
+          after: $after
+          before: $before
+          sortKey: PROCESSED_AT
+          reverse: true
+        ) {
           nodes {
             id
             number
@@ -390,13 +408,17 @@ export async function getCustomerOrders(options?: {
           }
           pageInfo {
             hasNextPage
+            hasPreviousPage
+            startCursor
             endCursor
           }
         }
       }
     }
   `,
-    { first, after: options?.after ?? null },
+    before
+      ? { last: pageSize, before }
+      : { first: pageSize, after: options?.after ?? null },
     { returnTo: "/account/orders" },
   );
 

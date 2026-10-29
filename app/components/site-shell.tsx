@@ -1,6 +1,9 @@
 import { Suspense } from "react";
 import { getNavCatalog } from "@/lib/catalog";
 import { announcementMessages, siteBrand } from "@/lib/site-content";
+
+// Demo offers (e.g. unconfirmed shipping/discount claims) stay hidden until real.
+const liveAnnouncements = announcementMessages.filter((message) => !message.demo);
 import AnnouncementBar from "./announcement-bar";
 import FavoritesRoot from "./favorites-root";
 import SiteFooter from "./site-footer";
@@ -36,7 +39,7 @@ export default function SiteShell({
       >
         Skip to content
       </a>
-      <AnnouncementBar messages={announcementMessages} />
+      <AnnouncementBar messages={liveAnnouncements} />
       <Suspense fallback={<SiteHeaderFallback />}>
         <SiteHeader />
       </Suspense>

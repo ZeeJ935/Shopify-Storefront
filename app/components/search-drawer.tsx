@@ -35,24 +35,56 @@ export default function SearchDrawer({ open, onClose }: SearchDrawerProps) {
   const router = useRouter();
   const titleId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [data, setData] = useState<PredictivePayload | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const debounceRef = useRef<number | null>(null);
 
+  // The header passes an inline onClose; a ref keeps the effect below from
+  // re-running (and re-recording focus) on every render.
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
-    if (!open) return;
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open || !panelRef.current) return;
+    const panel = panelRef.current;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
     document.body.classList.add("is-scroll-locked");
     inputRef.current?.focus();
+
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      // Results change as the shopper types, so query focusables per keypress.
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
     }
+
     window.addEventListener("keydown", onKey);
     return () => {
       document.body.classList.remove("is-scroll-locked");
       window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   const fetchPredictive = useCallback((q: string) => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
@@ -65,6 +97,11 @@ export default function SearchDrawer({ open, onClose }: SearchDrawerProps) {
         const res = await fetch(
           `/api/predictive-search?q=${encodeURIComponent(q)}`,
         );
+        // 400 (too long) / 429 (rate limited) bodies aren't result payloads.
+        if (!res.ok) {
+          setData(null);
+          return;
+        }
         const json = (await res.json()) as PredictivePayload;
         setData(json);
         setActiveIndex(-1);
@@ -135,7 +172,10 @@ export default function SearchDrawer({ open, onClose }: SearchDrawerProps) {
         aria-label="Close search"
         onClick={onClose}
       />
-      <div className="absolute inset-x-0 top-0 max-h-[90vh] overflow-y-auto border-b border-mist bg-snow shadow-lg">
+      <div
+        ref={panelRef}
+        className="absolute inset-x-0 top-0 max-h-[90vh] overflow-y-auto border-b border-mist bg-snow shadow-lg"
+      >
         <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
           <div className="flex items-center justify-between gap-4">
             <h2 id={titleId} className="font-display text-lg font-bold">
@@ -157,6 +197,7 @@ export default function SearchDrawer({ open, onClose }: SearchDrawerProps) {
             ref={inputRef}
             id="predictive-q"
             type="search"
+            maxLength={100}
             className="field mt-4"
             placeholder="Search products, collections…"
             value={query}

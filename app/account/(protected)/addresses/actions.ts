@@ -11,6 +11,15 @@ import {
   type MutationResult,
 } from "@/lib/customer-account/api";
 
+/**
+ * API/network failures: log the detail on the server, show the shopper a
+ * plain message. (Shopify userErrors are customer-facing and pass through.)
+ */
+function failure(action: string, error: unknown, message: string): MutationResult {
+  console.error(`[account/addresses] ${action}`, error);
+  return { ok: false, message };
+}
+
 function parseAddress(formData: FormData): CustomerAddressInput {
   return {
     firstName: String(formData.get("firstName") ?? ""),
@@ -58,10 +67,7 @@ export async function createAddressAction(
       : result;
   } catch (error) {
     unstable_rethrow(error);
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : "Could not add address.",
-    };
+    return failure("createAddress", error, "Could not add address. Please try again.");
   }
 }
 
@@ -88,11 +94,7 @@ export async function updateAddressAction(
       : result;
   } catch (error) {
     unstable_rethrow(error);
-    return {
-      ok: false,
-      message:
-        error instanceof Error ? error.message : "Could not update address.",
-    };
+    return failure("updateAddress", error, "Could not update address. Please try again.");
   }
 }
 
@@ -108,11 +110,11 @@ export async function setDefaultAddressAction(
       : result;
   } catch (error) {
     unstable_rethrow(error);
-    return {
-      ok: false,
-      message:
-        error instanceof Error ? error.message : "Could not set default address.",
-    };
+    return failure(
+      "setDefaultAddress",
+      error,
+      "Could not set default address. Please try again.",
+    );
   }
 }
 
@@ -131,10 +133,6 @@ export async function deleteAddressAction(
       : result;
   } catch (error) {
     unstable_rethrow(error);
-    return {
-      ok: false,
-      message:
-        error instanceof Error ? error.message : "Could not delete address.",
-    };
+    return failure("deleteAddress", error, "Could not delete address. Please try again.");
   }
 }

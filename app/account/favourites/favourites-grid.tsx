@@ -15,15 +15,10 @@ export default function FavouritesGrid() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (!hydrated) return;
+    // An empty list needs no fetch; the empty state is derived below.
+    if (!hydrated || ids.size === 0) return;
 
     const list = [...ids];
-    if (list.length === 0) {
-      setProducts([]);
-      setLoaded(true);
-      return;
-    }
-
     startTransition(async () => {
       try {
         const next = await loadFavouriteProducts(list);
@@ -36,7 +31,10 @@ export default function FavouritesGrid() {
     });
   }, [hydrated, ids]);
 
-  if (!hydrated || (!loaded && pending)) {
+  // Hide un-favourited products immediately, before any refetch lands.
+  const visibleProducts = products.filter((product) => ids.has(product.id));
+
+  if (!hydrated || (ids.size > 0 && !loaded && pending)) {
     return (
       <div className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -46,7 +44,7 @@ export default function FavouritesGrid() {
     );
   }
 
-  if (count === 0 || products.length === 0) {
+  if (count === 0 || visibleProducts.length === 0) {
     return (
       <div className="rounded-xl border border-mist bg-snow px-6 py-16 text-center shadow-sm">
         <h2 className="font-display text-xl font-semibold text-ink">
@@ -64,7 +62,7 @@ export default function FavouritesGrid() {
 
   return (
     <ul className="grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3">
-      {products.map((product) => (
+      {visibleProducts.map((product) => (
         <li key={product.id}>
           <ProductCard product={product} />
         </li>

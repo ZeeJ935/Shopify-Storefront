@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ShopifyImage } from "@/lib/products";
 
 const VISIBLE_THUMBS = 4;
@@ -20,17 +20,9 @@ export default function ProductGallery({
   const active = images[activeIndex] ?? null;
   const showArrows = images.length > VISIBLE_THUMBS;
   const maxStart = Math.max(0, images.length - VISIBLE_THUMBS);
+  // Thumbnails are only clickable while visible, so the active one never needs
+  // scrolling into view; the arrows move the strip freely.
   const visibleImages = images.slice(thumbStart, thumbStart + VISIBLE_THUMBS);
-
-  useEffect(() => {
-    if (activeIndex < thumbStart) {
-      setThumbStart(activeIndex);
-      return;
-    }
-    if (activeIndex >= thumbStart + VISIBLE_THUMBS) {
-      setThumbStart(Math.min(activeIndex - VISIBLE_THUMBS + 1, maxStart));
-    }
-  }, [activeIndex, thumbStart, maxStart]);
 
   if (images.length === 0) {
     return (

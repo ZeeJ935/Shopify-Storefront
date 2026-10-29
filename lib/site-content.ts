@@ -24,6 +24,7 @@ export const announcementMessages: AnnouncementMessage[] = [
     id: "shipping",
     text: "Free shipping on orders over $75",
     href: "/collections/all",
+    demo: true,
   },
   {
     id: "sale",
@@ -38,6 +39,7 @@ export const announcementMessages: AnnouncementMessage[] = [
   {
     id: "student",
     text: "Student discount available at checkout",
+    demo: true,
   },
 ];
 

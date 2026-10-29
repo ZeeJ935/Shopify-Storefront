@@ -36,10 +36,11 @@ export async function updateProfileAction(
       : result;
   } catch (error) {
     unstable_rethrow(error);
+    // Log the API detail; the shopper only needs to know it didn't save.
+    console.error("[account/profile] updateProfile", error);
     return {
       ok: false,
-      message:
-        error instanceof Error ? error.message : "Could not save profile.",
+      message: "Could not save profile. Please try again.",
     };
   }
 }

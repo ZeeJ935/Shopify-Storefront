@@ -1,6 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import AddressesManager from "@/app/account/components/addresses-manager";
 import { getCustomerAddresses } from "@/lib/customer-account/api";
+import { getShippingCountries } from "@/lib/localization";
 
 
 export default async function AccountAddressesPage() {
@@ -21,5 +22,11 @@ export default async function AccountAddressesPage() {
     );
   }
 
-  return <AddressesManager addresses={addresses} />;
+  // Optional: without it the form falls back to a typed country code.
+  const countries = await getShippingCountries().catch((error) => {
+    console.error("[account/addresses] countries", error);
+    return [];
+  });
+
+  return <AddressesManager addresses={addresses} countries={countries} />;
 }

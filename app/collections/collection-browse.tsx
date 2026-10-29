@@ -94,6 +94,8 @@ export default function CollectionBrowse({
   const [facets, setFacets] = useState(initialFacets);
   const [priceBounds, setPriceBounds] = useState(initialBounds);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Set when fetching the next page fails; pauses auto-loading until a retry.
+  const [loadError, setLoadError] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [draft, setDraft] = useState(() =>
     draftFromSearchParams(new URLSearchParams(queryKey)),
@@ -156,6 +158,7 @@ export default function CollectionBrowse({
     async (pageNum: number, append: boolean) => {
       if (loadingRef.current) return;
       loadingRef.current = true;
+      setLoadError(false);
       if (append) setLoadingMore(true);
       try {
         const params = new URLSearchParams(searchParams.toString());
@@ -180,7 +183,8 @@ export default function CollectionBrowse({
           return next;
         });
       } catch {
-        /* keep current */
+        // Keep what's shown, and let the shopper retry instead of stalling silently.
+        setLoadError(true);
       } finally {
         loadingRef.current = false;
         setLoadingMore(false);
@@ -191,7 +195,8 @@ export default function CollectionBrowse({
 
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || !hasNext) return;
+    // After a failure, wait for "Try again" rather than retrying on every scroll.
+    if (!el || !hasNext || loadError) return;
     const obs = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
@@ -202,7 +207,7 @@ export default function CollectionBrowse({
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [hasNext, page, loadPage]);
+  }, [hasNext, page, loadPage, loadError]);
 
   function replaceUrl(next: URLSearchParams) {
     const qs = next.toString();
@@ -321,13 +326,21 @@ export default function CollectionBrowse({
         <div ref={sentinelRef} className="h-4" aria-hidden="true" />
 
         {hasNext && !loadingMore && (
-          <div className="mt-8 flex justify-center">
+          <div
+            className="mt-8 flex flex-col items-center gap-3"
+            role={loadError ? "alert" : undefined}
+          >
+            {loadError ? (
+              <p className="text-sm text-danger">
+                Couldn&apos;t load more products.
+              </p>
+            ) : null}
             <button
               type="button"
               className="btn btn-secondary"
               onClick={() => void loadPage(page + 1, true)}
             >
-              Load more
+              {loadError ? "Try again" : "Load more"}
             </button>
           </div>
         )}

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { CustomerAddress } from "@/lib/customer-account/api";
+import type { ShippingCountry } from "@/lib/localization";
 import {
   createAddressAction,
   deleteAddressAction,
@@ -16,9 +17,13 @@ import { useToast } from "./toast";
 
 type AddressesManagerProps = {
   addresses: CustomerAddress[];
+  countries: ShippingCountry[];
 };
 
-export default function AddressesManager({ addresses }: AddressesManagerProps) {
+export default function AddressesManager({
+  addresses,
+  countries,
+}: AddressesManagerProps) {
   const router = useRouter();
   const { pushToast } = useToast();
   const [pending, startTransition] = useTransition();
@@ -157,6 +162,7 @@ export default function AddressesManager({ addresses }: AddressesManagerProps) {
         >
           <AddressForm
             address={editing}
+            countries={countries}
             fieldErrors={fieldErrors}
             pending={pending}
             idPrefix={modal === "edit" ? "edit" : "add"}

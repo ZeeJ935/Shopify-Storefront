@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { predictiveSearch } from "@/lib/search";
 
+const MAX_QUERY_LENGTH = 100;
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q") ?? "";
+
+  // Real searches are short; long strings only cost Shopify API budget.
+  if (q.length > MAX_QUERY_LENGTH) {
+    return NextResponse.json({ error: "Query too long" }, { status: 400 });
+  }
 
   if (!q.trim()) {
     return NextResponse.json({
