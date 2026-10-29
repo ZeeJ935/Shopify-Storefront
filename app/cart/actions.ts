@@ -17,6 +17,12 @@ import {
   cartCookieClearOptions,
   cartCookieSetOptions,
 } from "@/lib/cart-cookie";
+import {
+  isSoldOutAdd,
+  SOLD_OUT_MESSAGE,
+  toNotices,
+  type CartLineNotice,
+} from "@/lib/cart-notices";
 import { getCustomerSession } from "@/lib/customer-account/session";
 
 const DISCOUNT_CODE_MAX_LENGTH = 50;
@@ -25,14 +31,11 @@ const INVALID_DISCOUNT_MESSAGE =
 const CART_GONE_MESSAGE =
   "Your cart is no longer available. Add items from the store to start a new one.";
 
-/** Something the shopper should know about a line, e.g. stock capped it. */
-export type CartLineNotice = { lineId: string; message: string };
+export type { CartLineNotice } from "@/lib/cart-notices";
 
 export type CartActionResult =
   | { success: true; cart: Cart; notices: CartLineNotice[] }
   | { success: false; message: string; cartGone?: boolean };
-
-const SOLD_OUT_MESSAGE = "Sorry, this item just sold out.";
 
 export type CartLineQuantity = { id: string; quantity: number };
 
@@ -92,23 +95,6 @@ async function cartGone(): Promise<CartActionResult> {
   return { success: false, message: CART_GONE_MESSAGE, cartGone: true };
 }
 
-function toNotices({ cart, warnings }: CartMutationResult): CartLineNotice[] {
-  return warnings.map((warning) => {
-    const line = cart.lines.find((item) => item.id === warning.target);
-
-    if (warning.code === "MERCHANDISE_NOT_ENOUGH_STOCK" && line) {
-      return {
-        lineId: warning.target,
-        message: `Only ${line.quantity} available. We've updated your bag.`,
-      };
-    }
-    if (warning.code === "MERCHANDISE_OUT_OF_STOCK") {
-      return { lineId: warning.target, message: SOLD_OUT_MESSAGE };
-    }
-    return { lineId: warning.target, message: warning.message };
-  });
-}
-
 function ok(result: Cart | CartMutationResult): CartActionResult {
   if ("warnings" in result) {
     return {
@@ -120,18 +106,11 @@ function ok(result: Cart | CartMutationResult): CartActionResult {
   return { success: true, cart: toClientCart(result), notices: [] };
 }
 
-/** Shopify accepts an add of sold-out stock but leaves it out of the cart. */
 function addResult(
   result: CartMutationResult,
   variantId: string,
 ): CartActionResult {
-  const added = result.cart.lines.some(
-    (line) => line.merchandise.id === variantId,
-  );
-  const soldOut = result.warnings.some(
-    (warning) => warning.code === "MERCHANDISE_OUT_OF_STOCK",
-  );
-  if (!added && soldOut) {
+  if (isSoldOutAdd(result, variantId)) {
     return { success: false, message: SOLD_OUT_MESSAGE };
   }
   return ok(result);
@@ -156,12 +135,25 @@ async function createCartWithItem(
   variantId: string,
   quantity: number,
 ): Promise<CartActionResult> {
+  const lines = [{ merchandiseId: variantId, quantity }];
   // Signed-in shoppers get a cart tied to their account from the start.
-  const session = await getCustomerSession();
-  const result = await createCart(
-    [{ merchandiseId: variantId, quantity }],
-    session?.storefrontToken,
-  );
+  const storefrontToken = (await getCustomerSession())?.storefrontToken;
+
+  let result;
+  try {
+    result = await createCart(lines, storefrontToken);
+  } catch (error) {
+    if (!storefrontToken) {
+      throw error;
+    }
+    // An expired or rejected customer token must not block buying; lose the
+    // account link (checkout can still log in) rather than the add.
+    console.error(
+      "[cart] create with buyer identity failed; retrying without",
+      error,
+    );
+    result = await createCart(lines);
+  }
 
   const cookieStore = await cookies();
   cookieStore.set(CART_COOKIE, result.cart.id, cartCookieSetOptions());

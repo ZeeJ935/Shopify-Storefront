@@ -4,6 +4,12 @@ import ProductCard from "@/app/components/product-card";
 import SiteContainer from "@/app/components/site-container";
 import { searchProducts } from "@/lib/search";
 
+// Same limit as /api/predictive-search; real searches are short.
+const MAX_QUERY_LENGTH = 100;
+
+function cleanQuery(q: string | undefined) {
+  return (q ?? "").trim().slice(0, MAX_QUERY_LENGTH);
+}
 
 type SearchPageProps = {
   searchParams: Promise<{ q?: string; after?: string }>;
@@ -11,7 +17,7 @@ type SearchPageProps = {
 
 export async function generateMetadata({ searchParams }: SearchPageProps) {
   const { q } = await searchParams;
-  const query = (q ?? "").trim();
+  const query = cleanQuery(q);
   return {
     title: query ? `Search: ${query}` : "Search",
     description: query
@@ -24,7 +30,7 @@ export async function generateMetadata({ searchParams }: SearchPageProps) {
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
   const { q, after } = await searchParams;
-  const query = (q ?? "").trim();
+  const query = cleanQuery(q);
 
   let products: Awaited<ReturnType<typeof searchProducts>>["products"] = [];
   let pageInfo = { hasNextPage: false, endCursor: null as string | null };
@@ -60,6 +66,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             id="q"
             name="q"
             type="search"
+            maxLength={MAX_QUERY_LENGTH}
             defaultValue={query}
             placeholder="Search products"
             className="field"

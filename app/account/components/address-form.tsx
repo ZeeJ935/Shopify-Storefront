@@ -7,6 +7,8 @@ type AddressFormProps = {
   address?: CustomerAddress | null;
   /** The store's markets; empty falls back to a typed 2-letter code. */
   countries?: ShippingCountry[];
+  /** The store's own country, preselected for new addresses. */
+  defaultCountry?: string | null;
   fieldErrors?: Record<string, string>;
   pending?: boolean;
   idPrefix?: string;
@@ -61,11 +63,14 @@ function CountryField({
   id,
   countries,
   defaultValue,
+  storeCountry,
   error,
 }: {
   id: string;
   countries: ShippingCountry[];
   defaultValue: string | null | undefined;
+  /** Preselected for new addresses when it's one of the options. */
+  storeCountry: string | null;
   error?: string;
 }) {
   const current = defaultValue?.toUpperCase() || "";
@@ -75,6 +80,11 @@ function CountryField({
     current && !countries.some((country) => country.isoCode === current)
       ? [...countries, { isoCode: current, name: current }]
       : countries;
+  const initial =
+    current ||
+    (storeCountry && options.some((country) => country.isoCode === storeCountry)
+      ? storeCountry
+      : options[0]?.isoCode);
 
   return (
     <div>
@@ -84,7 +94,7 @@ function CountryField({
       <select
         id={id}
         name="countryCode"
-        defaultValue={current || options[0]?.isoCode}
+        defaultValue={initial}
         required
         autoComplete="country"
         aria-invalid={error ? true : undefined}
@@ -109,6 +119,7 @@ function CountryField({
 export default function AddressForm({
   address,
   countries = [],
+  defaultCountry = null,
   fieldErrors = {},
   pending = false,
   idPrefix = "address",
@@ -189,6 +200,7 @@ export default function AddressForm({
             id={`${idPrefix}-countryCode`}
             countries={countries}
             defaultValue={address?.country}
+            storeCountry={defaultCountry}
             error={fieldErrors.countryCode}
           />
         ) : (

@@ -199,6 +199,9 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   }, [markConfirmed]);
 
   const goToFavourites = useCallback(() => {
+    // Same as toggle: before the first load everyone looks signed out.
+    if (!hydrated) return;
+
     if (authenticated) {
       router.push("/account/favourites");
       return;
@@ -208,11 +211,15 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     };
     writeFavouritesIntent(intent);
     router.push(loginUrlForFavourites(intent));
-  }, [authenticated, router]);
+  }, [authenticated, hydrated, router]);
 
   const toggle = useCallback(
     (productId: string) => {
       if (!productId) return false;
+
+      // Until the first load finishes, everyone looks signed out; ignore the
+      // click rather than bouncing a signed-in shopper to login.
+      if (!hydrated) return true;
 
       if (!authenticated) {
         const intent = {
@@ -241,7 +248,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       persist();
       return true;
     },
-    [authenticated, persist, pushToast, reload, router, showIds],
+    [authenticated, hydrated, persist, pushToast, reload, router, showIds],
   );
 
   const idSet = useMemo(() => new Set(ids), [ids]);

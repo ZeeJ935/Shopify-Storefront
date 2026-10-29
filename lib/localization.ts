@@ -9,13 +9,22 @@ export type ShippingCountry = {
   name: string;
 };
 
-/** Countries the store sells to (its Shopify Markets), sorted by name. */
-export async function getShippingCountries(): Promise<ShippingCountry[]> {
+export type ShippingCountries = {
+  /** Countries the store sells to (its Shopify Markets), sorted by name. */
+  countries: ShippingCountry[];
+  /** The store's own country (primary market): the default for new addresses. */
+  defaultCountry: string | null;
+};
+
+export async function getShippingCountries(): Promise<ShippingCountries> {
   "use cache";
   cacheLife("hours");
 
   const data = await shopifyFetch<{
-    localization: { availableCountries: ShippingCountry[] };
+    localization: {
+      availableCountries: ShippingCountry[];
+      country: { isoCode: string } | null;
+    };
   }>(
     `query ShippingCountries {
       localization {
@@ -23,11 +32,17 @@ export async function getShippingCountries(): Promise<ShippingCountry[]> {
           isoCode
           name
         }
+        country {
+          isoCode
+        }
       }
     }`,
   );
 
-  return [...data.localization.availableCountries].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  return {
+    countries: [...data.localization.availableCountries].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    ),
+    defaultCountry: data.localization.country?.isoCode ?? null,
+  };
 }

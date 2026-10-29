@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import SiteContainer from "@/app/components/site-container";
+import { canonicalFor } from "@/lib/site-url";
 import {
   parseCatalogParams,
   queryCatalog,
@@ -11,6 +12,7 @@ import CollectionBrowse from "../collection-browse";
 export const metadata = {
   title: "Catalog",
   description: "Browse the full ZJ Store catalog.",
+  alternates: canonicalFor("/collections/all"),
 };
 
 type PageProps = {

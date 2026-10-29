@@ -16,6 +16,7 @@ import type {
   ResolvedNavLink,
 } from "@/lib/catalog";
 import { siteBrand } from "@/lib/site-content";
+import { useHasMounted } from "@/app/hooks/use-has-mounted";
 import CartDrawer from "./cart-drawer";
 import { useCart } from "./cart-provider";
 import { useFavorites } from "./favorites-provider";
@@ -116,15 +117,18 @@ export default function SiteHeaderShell({
   shopName = siteBrand.name,
   isAuthenticated = false,
 }: SiteHeaderShellProps) {
-  const {
-    hydrated: favHydrated,
-    count: favCount,
-    goToFavourites,
-  } = useFavorites();
+  const { hydrated, count: favCount, goToFavourites } = useFavorites();
   const { cart, status: cartStatus } = useCart();
+  // The header hydrates late (inside Suspense), often after favourites or the
+  // cart have loaded; gating on mount keeps its first render equal to the
+  // server HTML so labels/badges update instead of sticking (see hook).
+  const mounted = useHasMounted();
+  const favHydrated = mounted && hydrated;
   // The header isn't re-rendered on soft navigation, so the live cart wins once loaded.
   const cartQuantity =
-    cartStatus === "ready" ? (cart?.totalQuantity ?? 0) : serverCartQuantity;
+    mounted && cartStatus === "ready"
+      ? (cart?.totalQuantity ?? 0)
+      : serverCartQuantity;
   const [scrolled, setScrolled] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);

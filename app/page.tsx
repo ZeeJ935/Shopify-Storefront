@@ -7,6 +7,12 @@ import { getNavCatalog } from "@/lib/catalog";
 import { getCollectionProductsPreview } from "@/lib/collections";
 import { getProducts } from "@/lib/products";
 import { brandBenefits, heroSlides, siteBrand } from "@/lib/site-content";
+import { canonicalFor } from "@/lib/site-url";
+
+// Title/description come from the root layout.
+export const metadata = {
+  alternates: canonicalFor("/"),
+};
 
 const liveBenefits = brandBenefits.filter((benefit) => !benefit.demo);
 

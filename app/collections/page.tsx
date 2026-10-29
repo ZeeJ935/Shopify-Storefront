@@ -2,11 +2,13 @@ import Image from "next/image";
 import Link from "next/link";
 import SiteContainer from "@/app/components/site-container";
 import { getCollectionsIndex } from "@/lib/collections";
+import { canonicalFor } from "@/lib/site-url";
 
 
 export const metadata = {
   title: "Collections",
   description: "Browse ZJ Store collections.",
+  alternates: canonicalFor("/collections"),
 };
 
 export default async function CollectionsIndexPage() {

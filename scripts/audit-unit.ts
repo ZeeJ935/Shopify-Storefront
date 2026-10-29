@@ -6,6 +6,16 @@ import { safeReturnTo } from "../lib/favourites";
 import { createRateLimiter, isSameOrigin } from "../lib/rate-limit";
 import { verifyShopifyWebhook } from "../lib/shopify-webhook";
 import { mapProductNode, salePercentOff } from "../lib/products";
+import type { Cart, CartLine } from "../lib/cart";
+import { applyPendingEdits } from "../lib/cart-edits";
+import { isSoldOutAdd, SOLD_OUT_MESSAGE, toNotices } from "../lib/cart-notices";
+import {
+  isBackorder,
+  lineStockIssue,
+  lowStockCount,
+  MAX_LINE_QUANTITY,
+  maxPurchasable,
+} from "../lib/stock";
 
 const STORE = "zj-store-eer28nlk.myshopify.com";
 const CUSTOM = "shop.example.com";
@@ -220,7 +230,186 @@ function testShopifyWebhookSignature() {
   assert.equal(verifyShopifyWebhook(body, sign(body), ""), false, "no secret");
 }
 
+// --- Cart fixtures shaped like lib/cart.ts flattenCart output ---------------
+
+const usd = (amount: string) => ({ amount, currencyCode: "USD" });
+
+function cartLine(
+  id: string,
+  quantity: number,
+  unitPrice: string,
+  options: { total?: string; discounted?: boolean; variantId?: string } = {},
+): CartLine {
+  const subtotal = (Number(unitPrice) * quantity).toFixed(2);
+  return {
+    id,
+    quantity,
+    merchandise: {
+      id: options.variantId ?? `variant-${id}`,
+      title: "Default Title",
+      availableForSale: true,
+      currentlyNotInStock: false,
+      quantityAvailable: 20,
+      image: null,
+      product: { title: `Product ${id}`, handle: `product-${id}` },
+    },
+    discountAllocations: options.discounted
+      ? [
+          {
+            discountedAmount: usd("2.00"),
+            sourceDiscountApplication: { code: "SAVE" },
+          },
+        ]
+      : [],
+    cost: {
+      amountPerQuantity: usd(unitPrice),
+      compareAtAmountPerQuantity: null,
+      subtotalAmount: usd(subtotal),
+      totalAmount: usd(options.total ?? subtotal),
+    },
+  };
+}
+
+function cartOf(lines: CartLine[], subtotal: string, total: string): Cart {
+  return {
+    id: "gid://shopify/Cart/1",
+    checkoutUrl: "https://checkout.shopify.com/c/1",
+    updatedAt: "2026-10-29T10:00:00Z",
+    totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
+    discountCodes: [],
+    discountApplications: [],
+    cost: {
+      subtotalAmount: usd(subtotal),
+      totalAmount: usd(total),
+      checkoutChargeAmount: usd(total),
+    },
+    lines,
+  };
+}
+
+function testApplyPendingEdits() {
+  // A: 1 × $20. B: 2 × $10 with a $2 line discount (total $18).
+  const cart = cartOf(
+    [cartLine("A", 1, "20.00"), cartLine("B", 2, "10.00", { total: "18.00", discounted: true })],
+    "40.00",
+    "38.00",
+  );
+
+  assert.equal(applyPendingEdits(cart, {}, []), cart, "no edits → same object");
+
+  const raised = applyPendingEdits(cart, { A: 3 }, []);
+  const a = raised.lines.find((line) => line.id === "A")!;
+  assert.equal(a.quantity, 3);
+  assert.equal(Number(a.cost.subtotalAmount.amount), 60);
+  assert.equal(Number(a.cost.totalAmount.amount), 60);
+  assert.equal(Number(raised.cost.subtotalAmount.amount), 80);
+  // Server total shifted by the subtotal change: 38 + (80 − 40).
+  assert.equal(Number(raised.cost.totalAmount.amount), 78);
+  assert.equal(raised.totalQuantity, 5);
+
+  // A discounted line keeps Shopify's total until it recalculates.
+  const discounted = applyPendingEdits(cart, { B: 3 }, []);
+  const b = discounted.lines.find((line) => line.id === "B")!;
+  assert.equal(Number(b.cost.subtotalAmount.amount), 30);
+  assert.equal(b.cost.totalAmount.amount, "18.00");
+
+  const removed = applyPendingEdits(cart, {}, ["A"]);
+  assert.deepEqual(removed.lines.map((line) => line.id), ["B"]);
+  assert.equal(Number(removed.cost.subtotalAmount.amount), 20);
+  assert.equal(removed.totalQuantity, 2);
+}
+
+function testCartNotices() {
+  // Shape captured from Shopify: the warning target is the cart line id.
+  const lineId = "gid://shopify/CartLine/abc?cart=xyz";
+  const capped = cartOf(
+    [cartLine(lineId, 20, "25.00", { variantId: "gid://shopify/ProductVariant/1" })],
+    "500.00",
+    "500.00",
+  );
+
+  assert.deepEqual(
+    toNotices({
+      cart: capped,
+      warnings: [
+        {
+          code: "MERCHANDISE_NOT_ENOUGH_STOCK",
+          message: "Only 20 items were added to your cart due to availability.",
+          target: lineId,
+        },
+      ],
+    }),
+    [{ lineId, message: "Only 20 available. We've updated your bag." }],
+  );
+  assert.equal(
+    toNotices({
+      cart: capped,
+      warnings: [{ code: "MERCHANDISE_OUT_OF_STOCK", message: "x", target: lineId }],
+    })[0].message,
+    SOLD_OUT_MESSAGE,
+  );
+  assert.equal(
+    toNotices({
+      cart: capped,
+      warnings: [{ code: "SOMETHING_NEW", message: "Shopify says hi", target: lineId }],
+    })[0].message,
+    "Shopify says hi",
+    "unknown codes pass Shopify's message through",
+  );
+
+  const soldOutWarning = {
+    code: "MERCHANDISE_OUT_OF_STOCK",
+    message: "x",
+    target: "gid://shopify/ProductVariant/2",
+  };
+  const empty = cartOf([], "0.00", "0.00");
+  assert.equal(
+    isSoldOutAdd({ cart: empty, warnings: [soldOutWarning] }, "gid://shopify/ProductVariant/2"),
+    true,
+    "sold out and not added → failure",
+  );
+  assert.equal(
+    isSoldOutAdd({ cart: capped, warnings: [soldOutWarning] }, "gid://shopify/ProductVariant/1"),
+    false,
+    "the variant made it into the cart",
+  );
+  assert.equal(isSoldOutAdd({ cart: empty, warnings: [] }, "v"), false);
+}
+
+function testStockRules() {
+  const tracked = (quantityAvailable: number | null) => ({
+    availableForSale: true,
+    currentlyNotInStock: false,
+    quantityAvailable,
+  });
+  const backorder = { availableForSale: true, currentlyNotInStock: true, quantityAvailable: -3 };
+  const soldOut = { availableForSale: false, currentlyNotInStock: false, quantityAvailable: 0 };
+
+  assert.equal(maxPurchasable(soldOut), 0);
+  assert.equal(maxPurchasable(tracked(20)), 20);
+  assert.equal(maxPurchasable(tracked(150)), MAX_LINE_QUANTITY, "capped at 99");
+  assert.equal(maxPurchasable(tracked(0)), MAX_LINE_QUANTITY, "untracked");
+  assert.equal(maxPurchasable(tracked(null)), MAX_LINE_QUANTITY, "not fetched");
+  assert.equal(maxPurchasable(backorder), MAX_LINE_QUANTITY);
+  assert.equal(isBackorder(backorder), true);
+
+  assert.equal(lowStockCount(tracked(5)), 5);
+  assert.equal(lowStockCount(tracked(6)), null);
+  assert.equal(lowStockCount(backorder), null);
+
+  assert.equal(lineStockIssue(soldOut, 1), "Sold out. Remove it to check out.");
+  assert.equal(
+    lineStockIssue(tracked(3), 5),
+    "Only 3 available. Lower the quantity to check out.",
+  );
+  assert.equal(lineStockIssue(tracked(3), 3), null);
+  assert.equal(lineStockIssue(backorder, 50), null);
+}
+
 testRateLimiter();
 testSameOrigin();
 testShopifyWebhookSignature();
+testApplyPendingEdits();
+testCartNotices();
+testStockRules();
 console.log("audit-unit: all assertions passed");

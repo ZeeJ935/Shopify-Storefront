@@ -1,5 +1,6 @@
 "use client";
 
+import { useHasMounted } from "@/app/hooks/use-has-mounted";
 import { useFavorites } from "./favorites-provider";
 
 type FavoriteButtonProps = {
@@ -32,7 +33,10 @@ export default function FavoriteButton({
   size = "sm",
 }: FavoriteButtonProps) {
   const { hydrated, authenticated, isFavourite, toggle } = useFavorites();
-  const active = hydrated && authenticated && isFavourite(productId);
+  // Matches the server HTML on hydration, then shows real state (see hook).
+  const mounted = useHasMounted();
+  const signedIn = mounted && authenticated;
+  const active = mounted && hydrated && authenticated && isFavourite(productId);
   const dim = size === "md" ? "h-11 w-11 text-base" : "h-9 w-9 text-sm";
 
   return (
@@ -42,8 +46,9 @@ export default function FavoriteButton({
         active ? "text-sale" : "text-ink"
       } ${className}`.trim()}
       aria-pressed={active}
+      // The provider ignores clicks until favourites have loaded.
       aria-label={
-        !authenticated
+        !signedIn
           ? "Sign in to save favourites"
           : active
             ? "Remove from favourites"

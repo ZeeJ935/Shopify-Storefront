@@ -58,9 +58,12 @@ export default async function AccountLoginPage({ searchParams }: LoginPageProps)
       ) : null}
 
       <div className="mt-8 space-y-3">
-        <Link href={authorizeHref} className="btn btn-primary w-full">
+        {/* Plain <a>, not <Link>: /account/authorize sets a PKCE cookie and
+            redirects to Shopify. <Link> would prefetch it (a new cookie and a
+            CORS error each time) and fetch it on click before falling back. */}
+        <a href={authorizeHref} className="btn btn-primary w-full">
           Continue with Shopify
-        </Link>
+        </a>
         <Link
           href="/collections/all"
           className="flex min-h-11 items-center justify-center text-sm font-medium text-steel underline-offset-4 hover:text-ink hover:underline"

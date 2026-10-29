@@ -18,11 +18,13 @@ import { useToast } from "./toast";
 type AddressesManagerProps = {
   addresses: CustomerAddress[];
   countries: ShippingCountry[];
+  defaultCountry: string | null;
 };
 
 export default function AddressesManager({
   addresses,
   countries,
+  defaultCountry,
 }: AddressesManagerProps) {
   const router = useRouter();
   const { pushToast } = useToast();
@@ -163,6 +165,7 @@ export default function AddressesManager({
           <AddressForm
             address={editing}
             countries={countries}
+            defaultCountry={defaultCountry}
             fieldErrors={fieldErrors}
             pending={pending}
             idPrefix={modal === "edit" ? "edit" : "add"}

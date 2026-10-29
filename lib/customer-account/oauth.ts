@@ -213,7 +213,13 @@ export async function refreshCustomerSessionTokens(
   });
 
   const token = await postToken(body);
-  return toSession(token, previous);
+  const session = toSession(token, previous);
+  // Re-issue the Storefront customer token alongside each refresh so cart
+  // buyer identity never relies on a stale one; keep the old one on failure.
+  const storefrontToken = await createStorefrontCustomerToken(
+    token.access_token,
+  );
+  return { ...session, storefrontToken: storefrontToken ?? session.storefrontToken };
 }
 
 export async function buildCustomerLogoutUrl(idToken?: string) {

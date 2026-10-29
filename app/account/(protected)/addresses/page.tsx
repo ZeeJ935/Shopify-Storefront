@@ -23,10 +23,18 @@ export default async function AccountAddressesPage() {
   }
 
   // Optional: without it the form falls back to a typed country code.
-  const countries = await getShippingCountries().catch((error) => {
-    console.error("[account/addresses] countries", error);
-    return [];
-  });
+  const { countries, defaultCountry } = await getShippingCountries().catch(
+    (error) => {
+      console.error("[account/addresses] countries", error);
+      return { countries: [], defaultCountry: null };
+    },
+  );
 
-  return <AddressesManager addresses={addresses} countries={countries} />;
+  return (
+    <AddressesManager
+      addresses={addresses}
+      countries={countries}
+      defaultCountry={defaultCountry}
+    />
+  );
 }

@@ -22,7 +22,7 @@ import {
   type CartLineNotice,
 } from "@/app/cart/actions";
 import type { Cart } from "@/lib/cart";
-import { multiplyMoney, sumMoney } from "@/lib/money";
+import { applyPendingEdits } from "@/lib/cart-edits";
 import { maxPurchasable } from "@/lib/stock";
 import { useStorefrontToast } from "./storefront-toast";
 
@@ -59,9 +59,11 @@ type CartContextValue = {
 
 const CartContext = createContext<CartContextValue | null>(null);
 
+// Covers a dropped connection and a rate-limited (429) request alike; the
+// client can't tell them apart, so don't blame the shopper's connection.
 const NETWORK_FAILURE: CartActionResult = {
   success: false,
-  message: "Unable to reach the store. Check your connection and try again.",
+  message: "Couldn't update your bag. Please try again in a moment.",
 };
 
 async function safely(
@@ -85,63 +87,6 @@ function withoutKey<T>(record: Record<string, T>, key: string) {
 
 function isNewer(candidate: Cart, current: Cart) {
   return Date.parse(candidate.updatedAt) > Date.parse(current.updatedAt);
-}
-
-function applyPendingEdits(
-  cart: Cart,
-  overrides: Record<string, number>,
-  removedIds: string[],
-): Cart {
-  if (Object.keys(overrides).length === 0 && removedIds.length === 0) {
-    return cart;
-  }
-
-  const lines = cart.lines
-    .filter((line) => !removedIds.includes(line.id))
-    .map((line) => {
-      const quantity = overrides[line.id];
-      if (quantity === undefined || quantity === line.quantity) {
-        return line;
-      }
-
-      const subtotalAmount = multiplyMoney(
-        line.cost.amountPerQuantity,
-        quantity,
-      );
-      // Discounted totals are only known once Shopify recalculates.
-      const totalAmount =
-        line.discountAllocations.length > 0
-          ? line.cost.totalAmount
-          : subtotalAmount;
-
-      return {
-        ...line,
-        quantity,
-        cost: { ...line.cost, subtotalAmount, totalAmount },
-      };
-    });
-
-  const currency = cart.cost.subtotalAmount.currencyCode;
-  const subtotalAmount = sumMoney(
-    lines.map((line) => line.cost.subtotalAmount),
-    currency,
-  );
-  // Shift the server total by the subtotal change; discounts settle on confirm.
-  const totalAmount = sumMoney(
-    [
-      cart.cost.totalAmount,
-      subtotalAmount,
-      multiplyMoney(cart.cost.subtotalAmount, -1),
-    ],
-    currency,
-  );
-
-  return {
-    ...cart,
-    lines,
-    totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
-    cost: { ...cart.cost, subtotalAmount, totalAmount },
-  };
 }
 
 export function CartProvider({ children }: { children: ReactNode }) {

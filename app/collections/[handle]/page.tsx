@@ -9,6 +9,7 @@ import {
 } from "@/lib/catalog-query";
 import { getCatalogSnapshot } from "@/lib/catalog-snapshot";
 import { shopifyFetch, CATALOG_REVALIDATE } from "@/lib/shopify";
+import { canonicalFor } from "@/lib/site-url";
 import CollectionBrowse from "../collection-browse";
 
 
@@ -60,6 +61,7 @@ export async function generateMetadata({ params }: PageProps) {
     return {
       title: meta.title,
       description: meta.description || undefined,
+      alternates: canonicalFor(`/collections/${handle}`),
     };
   } catch {
     return { title: "Collection" };

@@ -103,11 +103,13 @@ npm run dev      # development
 npm run build    # production build
 npm run start    # serve build
 npm run lint     # eslint
+npm test         # unit asserts (scripts/audit-unit.ts): checkout URL, money, sale price,
+                 # return paths, rate limiter, webhook signatures, cart edits/notices, stock rules
 
 npx tsx scripts/test-cart.ts <product-handle>   # live cart smoke test (hits Shopify)
-npx tsx scripts/audit-unit.ts                   # unit asserts: checkout URL, money, sale price,
-                                                # return paths, rate limiter, webhook signatures
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck and `npm test` on every push and pull request. It doesn't run `next build`: that prerenders pages from Shopify (needs store secrets), and Vercel builds every push anyway.
 
 ## Deploy
 
@@ -134,6 +136,7 @@ The endpoint rejects unsigned requests (401) and refreshes all catalog data tagg
 - Checkout URLs are host-checked on the server before reaching the browser; login `returnTo` paths must stay on-site.
 - `proxy.ts` rate-limits search, catalog and Server Actions per IP (in-memory, per server instance — best effort; use Upstash or Vercel Firewall for a hard global limit) and rejects cross-site logout.
 - Webhooks are verified with HMAC-SHA256 over the raw body.
+- `next.config.ts` sends `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options: DENY` and `Permissions-Policy` on every response. No Content-Security-Policy yet; HSTS comes from Vercel.
 
 ## Known gaps
 
@@ -142,4 +145,4 @@ The endpoint rejects unsigned requests (401) and refreshes all catalog data tagg
 - No analytics / cookie consent
 - Single market: prices shown in the store currency, `en-US` formatting
 - Variants and images are capped per product (100 variants, 12 images on the product page)
-- No CI or test runner; unit asserts run manually
+- No end-to-end (browser) tests; `next build` isn't part of CI
