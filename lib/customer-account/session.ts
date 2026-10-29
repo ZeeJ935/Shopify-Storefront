@@ -20,6 +20,8 @@ export type CustomerSession = {
   refreshToken: string;
   expiresAt: number;
   idToken?: string;
+  /** Storefront API customer token; links carts to the customer for checkout. */
+  storefrontToken?: string;
 };
 
 export type PkcePayload = {
@@ -165,6 +167,7 @@ export function applyCustomerSession(
         accessToken: session.accessToken,
         refreshToken: session.refreshToken,
         expiresAt: session.expiresAt,
+        storefrontToken: session.storefrontToken,
       },
       sessionSecret,
     ),
@@ -205,6 +208,7 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
       accessToken: string;
       refreshToken: string;
       expiresAt: number;
+      storefrontToken?: string;
     }>(value, sessionSecret);
 
     if (
@@ -227,6 +231,10 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
       refreshToken: session.refreshToken,
       expiresAt: session.expiresAt,
       idToken,
+      storefrontToken:
+        typeof session.storefrontToken === "string"
+          ? session.storefrontToken
+          : undefined,
     };
   } catch {
     return null;

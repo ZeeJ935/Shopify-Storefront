@@ -252,6 +252,8 @@ function assertUpdateQuantity(quantity: number) {
 /** Creates a cart, optionally with initial lines, in a single request. */
 export async function createCart(
   lines: CartLineInput[] = [],
+  /** Storefront customer token of a signed-in shopper, linking the cart to them. */
+  customerAccessToken?: string,
 ): Promise<CartMutationResult> {
   for (const line of lines) {
     assertNonEmptyId(line.merchandiseId, "Merchandise ID");
@@ -282,6 +284,9 @@ export async function createCart(
           merchandiseId: line.merchandiseId.trim(),
           quantity: line.quantity,
         })),
+        ...(customerAccessToken
+          ? { buyerIdentity: { customerAccessToken } }
+          : {}),
       },
     },
   );
@@ -351,6 +356,53 @@ export async function addToCart(
   }
 
   return { cart: flattenCart(cart), warnings };
+}
+
+/**
+ * Associates an existing cart with a signed-in customer, so checkout is tied
+ * to their account and can prefill their details.
+ */
+export async function linkCartToCustomer(
+  cartId: string,
+  customerAccessToken: string,
+) {
+  assertNonEmptyId(cartId, "Cart ID");
+  assertNonEmptyId(customerAccessToken, "Customer access token");
+
+  const data = await shopifyFetch<{
+    cartBuyerIdentityUpdate: {
+      cart: { id: string } | null;
+      userErrors: { message: string }[];
+    };
+  }>(
+    `mutation CartBuyerIdentityUpdate(
+      $cartId: ID!,
+      $buyerIdentity: CartBuyerIdentityInput!
+    ) {
+      cartBuyerIdentityUpdate(cartId: $cartId, buyerIdentity: $buyerIdentity) {
+        cart {
+          id
+        }
+        userErrors {
+          message
+        }
+      }
+    }`,
+    {
+      cartId: cartId.trim(),
+      buyerIdentity: { customerAccessToken },
+    },
+  );
+
+  const { cart, userErrors } = data.cartBuyerIdentityUpdate;
+
+  if (userErrors.length > 0) {
+    throw new Error(userErrors.map((error) => error.message).join(", "));
+  }
+
+  if (!cart) {
+    throw new Error("Shopify did not return the updated cart.");
+  }
 }
 
 export async function getCart(cartId: string) {

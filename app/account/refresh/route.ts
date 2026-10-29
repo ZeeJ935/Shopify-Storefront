@@ -6,12 +6,13 @@ import {
   clearCustomerSessionCookies,
   getCustomerSession,
 } from "@/lib/customer-account/session";
+import { safeReturnTo } from "@/lib/favourites";
 
 export async function GET(request: Request) {
   await connection();
   const { searchParams } = new URL(request.url);
-  const returnToRaw = searchParams.get("return_to") || "/account";
-  const returnTo = returnToRaw.startsWith("/") ? returnToRaw : "/account";
+  // safeReturnTo rejects protocol-relative `//host` paths (open redirect).
+  const returnTo = safeReturnTo(searchParams.get("return_to"));
 
   const session = await getCustomerSession();
   if (!session) {

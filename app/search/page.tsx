@@ -17,6 +17,8 @@ export async function generateMetadata({ searchParams }: SearchPageProps) {
     description: query
       ? `Search results for ${query}`
       : "Search the ZJ Store catalog.",
+    // Endless query variations would be thin, duplicate pages; links still count.
+    robots: { index: false, follow: true },
   };
 }
 

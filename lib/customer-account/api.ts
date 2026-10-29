@@ -419,169 +419,187 @@ export async function getCustomerOrders(options?: {
   };
 }
 
+const ORDER_GID = /^gid:\/\/shopify\/Order\/\d+$/;
+
+/**
+ * Null only when the order doesn't exist (or isn't this customer's). API and
+ * network failures throw, so callers can show an error instead of a 404.
+ */
 export async function getCustomerOrderById(
   id: string,
 ): Promise<CustomerOrderDetail | null> {
-  try {
-    const data = await customerAccountFetch<{
-      order: {
-        id: string;
-        number: number;
-        name: string;
-        processedAt: string;
-        financialStatus: string | null;
-        fulfillmentStatus: string | null;
-        totalPrice: { amount: string; currencyCode: string };
-        subtotal?: { amount: string; currencyCode: string } | null;
-        totalShipping?: { amount: string; currencyCode: string } | null;
-        totalTax?: { amount: string; currencyCode: string } | null;
-        shippingAddress: {
-          formatted: string[];
-          firstName: string | null;
-          lastName: string | null;
-        } | null;
-        lineItems: {
-          nodes: {
-            title: string;
-            quantity: number;
-            variantTitle: string | null;
-            image: { url: string; altText: string | null } | null;
-            price: { amount: string; currencyCode: string } | null;
-          }[];
-        };
-        fulfillments: {
-          nodes: {
-            status: string | null;
-            trackingInformation: {
-              company: string | null;
-              number: string | null;
-              url: string | null;
-            }[];
-          }[];
-        };
+  // A malformed id is a missing page, not an outage; don't send it to Shopify.
+  if (!ORDER_GID.test(id)) {
+    return null;
+  }
+
+  const data = await customerAccountFetch<{
+    order: {
+      id: string;
+      number: number;
+      name: string;
+      processedAt: string;
+      financialStatus: string | null;
+      fulfillmentStatus: string | null;
+      totalPrice: { amount: string; currencyCode: string };
+      subtotal?: { amount: string; currencyCode: string } | null;
+      totalShipping?: { amount: string; currencyCode: string } | null;
+      totalTax?: { amount: string; currencyCode: string } | null;
+      shippingAddress: {
+        formatted: string[];
+        firstName: string | null;
+        lastName: string | null;
       } | null;
-    }>(
-      `
-      query CustomerOrder($id: ID!) {
-        order(id: $id) {
-          id
-          number
-          name
-          processedAt
-          financialStatus
-          fulfillmentStatus
-          totalPrice {
-            amount
-            currencyCode
-          }
-          subtotal {
-            amount
-            currencyCode
-          }
-          totalShipping {
-            amount
-            currencyCode
-          }
-          totalTax {
-            amount
-            currencyCode
-          }
-          shippingAddress {
-            formatted
-            firstName
-            lastName
-          }
-          lineItems(first: 50) {
-            nodes {
-              title
-              quantity
-              variantTitle
-              image {
-                url
-                altText
-              }
-              price {
-                amount
-                currencyCode
-              }
+      lineItems: {
+        nodes: {
+          title: string;
+          quantity: number;
+          variantTitle: string | null;
+          image: { url: string; altText: string | null } | null;
+          price: { amount: string; currencyCode: string } | null;
+        }[];
+      };
+      fulfillments: {
+        nodes: {
+          status: string | null;
+          trackingInformation: {
+            company: string | null;
+            number: string | null;
+            url: string | null;
+          }[];
+        }[];
+      };
+    } | null;
+  }>(
+    `
+    query CustomerOrder($id: ID!) {
+      order(id: $id) {
+        id
+        number
+        name
+        processedAt
+        financialStatus
+        fulfillmentStatus
+        totalPrice {
+          amount
+          currencyCode
+        }
+        subtotal {
+          amount
+          currencyCode
+        }
+        totalShipping {
+          amount
+          currencyCode
+        }
+        totalTax {
+          amount
+          currencyCode
+        }
+        shippingAddress {
+          formatted
+          firstName
+          lastName
+        }
+        lineItems(first: 50) {
+          nodes {
+            title
+            quantity
+            variantTitle
+            image {
+              url
+              altText
+            }
+            price {
+              amount
+              currencyCode
             }
           }
-          fulfillments(first: 10) {
-            nodes {
-              status
-              trackingInformation {
-                company
-                number
-                url
-              }
+        }
+        fulfillments(first: 10) {
+          nodes {
+            status
+            trackingInformation {
+              company
+              number
+              url
             }
           }
         }
       }
-    `,
-      { id },
-      { returnTo: `/account/orders/${encodeURIComponent(id)}` },
-    );
+    }
+  `,
+    { id },
+    { returnTo: `/account/orders/${encodeURIComponent(id)}` },
+  );
 
-    if (!data.order) return null;
+  if (!data.order) return null;
 
-    const order = data.order;
-    return {
-      id: order.id,
-      number: order.number,
-      name: order.name,
-      processedAt: order.processedAt,
-      financialStatus: order.financialStatus,
-      fulfillmentStatus: order.fulfillmentStatus,
-      totalPrice: order.totalPrice,
-      subtotal: order.subtotal ?? null,
-      totalShipping: order.totalShipping ?? null,
-      totalTax: order.totalTax ?? null,
-      shippingAddress: order.shippingAddress,
-      lines: order.lineItems.nodes.map((line) => ({
-        title: line.title,
-        quantity: line.quantity,
-        variantTitle: line.variantTitle,
-        imageUrl: line.image?.url ?? null,
-        imageAlt: line.image?.altText ?? null,
-        price: line.price,
-      })),
-      fulfillments: order.fulfillments.nodes.flatMap((fulfillment) => {
-        if (
-          !fulfillment.trackingInformation ||
-          fulfillment.trackingInformation.length === 0
-        ) {
-          return [
-            {
-              status: fulfillment.status,
-              trackingCompany: null,
-              trackingNumber: null,
-              trackingUrl: null,
-            },
-          ];
-        }
-        return fulfillment.trackingInformation.map((track) => ({
-          status: fulfillment.status,
-          trackingCompany: track.company,
-          trackingNumber: track.number,
-          trackingUrl: track.url,
-        }));
-      }),
-    };
-  } catch (error) {
-    unstable_rethrow(error);
-    return null;
-  }
+  const order = data.order;
+  return {
+    id: order.id,
+    number: order.number,
+    name: order.name,
+    processedAt: order.processedAt,
+    financialStatus: order.financialStatus,
+    fulfillmentStatus: order.fulfillmentStatus,
+    totalPrice: order.totalPrice,
+    subtotal: order.subtotal ?? null,
+    totalShipping: order.totalShipping ?? null,
+    totalTax: order.totalTax ?? null,
+    shippingAddress: order.shippingAddress,
+    lines: order.lineItems.nodes.map((line) => ({
+      title: line.title,
+      quantity: line.quantity,
+      variantTitle: line.variantTitle,
+      imageUrl: line.image?.url ?? null,
+      imageAlt: line.image?.altText ?? null,
+      price: line.price,
+    })),
+    fulfillments: order.fulfillments.nodes.flatMap((fulfillment) => {
+      if (
+        !fulfillment.trackingInformation ||
+        fulfillment.trackingInformation.length === 0
+      ) {
+        return [
+          {
+            status: fulfillment.status,
+            trackingCompany: null,
+            trackingNumber: null,
+            trackingUrl: null,
+          },
+        ];
+      }
+      return fulfillment.trackingInformation.map((track) => ({
+        status: fulfillment.status,
+        trackingCompany: track.company,
+        trackingNumber: track.number,
+        trackingUrl: track.url,
+      }));
+    }),
+  };
 }
 
-function cleanAddressInput(input: CustomerAddressInput): CustomerAddressInput {
+/**
+ * Trims values. Omitting a field leaves Shopify's stored value untouched, so
+ * on update (`keepCleared`) a field the form submitted empty is sent as ""
+ * (or null) to actually clear it; on create, empty fields are simply left out.
+ */
+function cleanAddressInput(
+  input: CustomerAddressInput,
+  { keepCleared = false }: { keepCleared?: boolean } = {},
+): CustomerAddressInput {
   const out: CustomerAddressInput = {};
   for (const [key, value] of Object.entries(input) as [
     keyof CustomerAddressInput,
     string | null | undefined,
   ][]) {
     const trimmed = typeof value === "string" ? value.trim() : value;
-    if (trimmed) out[key] = trimmed;
+    if (trimmed) {
+      out[key] = trimmed;
+    } else if (keepCleared && trimmed !== undefined) {
+      out[key] = trimmed;
+    }
   }
   return out;
 }
@@ -632,7 +650,7 @@ export async function updateCustomerAddress(
   `,
     {
       addressId,
-      address: cleanAddressInput(input),
+      address: cleanAddressInput(input, { keepCleared: true }),
       defaultAddress: defaultAddress ?? null,
     },
     { returnTo: "/account/addresses" },

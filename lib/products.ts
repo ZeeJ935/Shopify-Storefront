@@ -187,14 +187,16 @@ type ProductNode = {
 
 export function mapProductNode(node: ProductNode): ProductListItem {
   const variants = node.variants.edges.map((e) => e.node);
+  // Cards show the cheapest price, so the "was" price must belong to a variant
+  // at that same price; otherwise a sale on a pricier variant fakes a discount.
+  const minPrice = Number(node.priceRange.minVariantPrice.amount);
   const compareAt =
     variants.find(
       (v) =>
+        Number(v.price.amount) === minPrice &&
         v.compareAtPrice &&
-        Number(v.compareAtPrice.amount) > Number(v.price.amount),
-    )?.compareAtPrice ??
-    variants[0]?.compareAtPrice ??
-    null;
+        Number(v.compareAtPrice.amount) > minPrice,
+    )?.compareAtPrice ?? null;
 
   return {
     id: node.id,

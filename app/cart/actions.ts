@@ -17,6 +17,7 @@ import {
   cartCookieClearOptions,
   cartCookieSetOptions,
 } from "@/lib/cart-cookie";
+import { getCustomerSession } from "@/lib/customer-account/session";
 
 const DISCOUNT_CODE_MAX_LENGTH = 50;
 const INVALID_DISCOUNT_MESSAGE =
@@ -155,7 +156,12 @@ async function createCartWithItem(
   variantId: string,
   quantity: number,
 ): Promise<CartActionResult> {
-  const result = await createCart([{ merchandiseId: variantId, quantity }]);
+  // Signed-in shoppers get a cart tied to their account from the start.
+  const session = await getCustomerSession();
+  const result = await createCart(
+    [{ merchandiseId: variantId, quantity }],
+    session?.storefrontToken,
+  );
 
   const cookieStore = await cookies();
   cookieStore.set(CART_COOKIE, result.cart.id, cartCookieSetOptions());

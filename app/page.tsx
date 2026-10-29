@@ -8,6 +8,8 @@ import { getCollectionProductsPreview } from "@/lib/collections";
 import { getProducts } from "@/lib/products";
 import { brandBenefits, heroSlides, siteBrand } from "@/lib/site-content";
 
+const liveBenefits = brandBenefits.filter((benefit) => !benefit.demo);
+
 export default async function Home() {
   const catalog = await getNavCatalog();
 
@@ -227,24 +229,21 @@ export default async function Home() {
         </section>
       )}
 
-      {/* Brand / value strip */}
-      <section className="border-y border-mist bg-white py-12">
-        <SiteContainer className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-          {brandBenefits.map((b) => (
-            <div key={b.id}>
-              <h3 className="font-display text-sm font-bold uppercase tracking-wide text-ink">
-                {b.title}
-              </h3>
-              <p className="mt-2 text-sm text-steel">
-                {b.description}
-                {b.demo ? (
-                  <span className="sr-only"> Demo placeholder.</span>
-                ) : null}
-              </p>
-            </div>
-          ))}
-        </SiteContainer>
-      </section>
+      {/* Brand / value strip: demo claims (shipping, returns) stay hidden until real. */}
+      {liveBenefits.length >= 2 ? (
+        <section className="border-y border-mist bg-white py-12">
+          <SiteContainer className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            {liveBenefits.map((b) => (
+              <div key={b.id}>
+                <h3 className="font-display text-sm font-bold uppercase tracking-wide text-ink">
+                  {b.title}
+                </h3>
+                <p className="mt-2 text-sm text-steel">{b.description}</p>
+              </div>
+            ))}
+          </SiteContainer>
+        </section>
+      ) : null}
     </main>
   );
 }

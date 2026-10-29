@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+// Lets an expired session's refresh redirect escape the catch below.
+import { unstable_rethrow } from "next/navigation";
 import {
   updateCustomerProfile,
   type MutationResult,
@@ -33,6 +35,7 @@ export async function updateProfileAction(
       ? { ok: true, message: "Profile saved." }
       : result;
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message:

@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, unstable_rethrow } from "next/navigation";
 import PriceSummary from "@/app/account/components/price-summary";
 import StatusBadge from "@/app/account/components/status-badge";
 import { getCustomerOrderById } from "@/lib/customer-account/api";
@@ -48,13 +48,32 @@ export default async function AccountOrderDetailPage({
 }: OrderDetailPageProps) {
   const { id: rawId } = await params;
   const id = decodeURIComponent(rawId);
-  const order = await getCustomerOrderById(id);
+
+  let order;
+  try {
+    order = await getCustomerOrderById(id);
+  } catch (error) {
+    unstable_rethrow(error);
+    return (
+      <div className="rounded-xl border border-mist bg-snow p-6 shadow-sm">
+        <h2 className="font-display text-xl font-semibold text-ink">Order</h2>
+        <p className="mt-2 text-sm text-steel">
+          We couldn’t load this order. Please try again later.
+        </p>
+        <Link href="/account/orders" className="btn btn-secondary mt-6">
+          Back to orders
+        </Link>
+      </div>
+    );
+  }
 
   if (!order) {
     notFound();
   }
 
   const steps = timelineSteps(order);
+  // Hidden until a real address is configured, rather than a placeholder.
+  const supportEmail = process.env.SUPPORT_EMAIL?.trim();
 
   return (
     <div className="space-y-8">
@@ -155,9 +174,11 @@ export default async function AccountOrderDetailPage({
             <Link href="/collections/all" className="btn btn-primary">
               Buy again
             </Link>
-            <a href="mailto:support@example.com" className="btn btn-secondary">
-              Need help?
-            </a>
+            {supportEmail ? (
+              <a href={`mailto:${supportEmail}`} className="btn btn-secondary">
+                Need help?
+              </a>
+            ) : null}
           </div>
         </section>
 

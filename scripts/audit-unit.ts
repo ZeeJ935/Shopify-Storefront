@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { isSafeShopifyCheckoutUrl } from "../lib/checkout-url";
 import { formatMoney } from "../lib/money";
-import { salePercentOff } from "../lib/products";
+import { safeReturnTo } from "../lib/favourites";
+import { mapProductNode, salePercentOff } from "../lib/products";
 
 const STORE = "zj-store-eer28nlk.myshopify.com";
 const CUSTOM = "shop.example.com";
@@ -91,7 +92,80 @@ function testSalePercent() {
   );
 }
 
+function productNode(
+  variants: { price: string; compareAt: string | null }[],
+) {
+  const usd = (amount: string) => ({ amount, currencyCode: "USD" });
+  const min = Math.min(...variants.map((v) => Number(v.price))).toFixed(2);
+  return {
+    id: "p",
+    title: "P",
+    handle: "p",
+    description: "",
+    productType: "",
+    vendor: "",
+    tags: [],
+    availableForSale: true,
+    featuredImage: null,
+    images: { edges: [] },
+    priceRange: { minVariantPrice: usd(min) },
+    variants: {
+      edges: variants.map((v, i) => ({
+        node: {
+          id: `v${i}`,
+          title: `V${i}`,
+          availableForSale: true,
+          price: usd(v.price),
+          compareAtPrice: v.compareAt ? usd(v.compareAt) : null,
+          selectedOptions: [],
+        },
+      })),
+    },
+  } as Parameters<typeof mapProductNode>[0];
+}
+
+function testCompareAtComesFromCheapestVariant() {
+  // Only the pricier variant is on sale: the card's $50 must not show "was $90".
+  assert.equal(
+    mapProductNode(
+      productNode([
+        { price: "50.00", compareAt: null },
+        { price: "80.00", compareAt: "90.00" },
+      ]),
+    ).compareAtPrice,
+    null,
+  );
+  // The cheapest variant is on sale: its own compare-at price is used.
+  assert.deepEqual(
+    mapProductNode(
+      productNode([
+        { price: "50.00", compareAt: "70.00" },
+        { price: "80.00", compareAt: "90.00" },
+      ]),
+    ).compareAtPrice,
+    { amount: "70.00", currencyCode: "USD" },
+  );
+}
+
+function testSafeReturnTo() {
+  // Each of these resolves to another origin in a browser.
+  for (const offsite of [
+    "//evil.com",
+    "/\\evil.com",
+    "/\t/evil.com",
+    "/\n/evil.com",
+    "https://evil.com",
+  ]) {
+    assert.equal(safeReturnTo(offsite), "/account", JSON.stringify(offsite));
+  }
+  assert.equal(safeReturnTo("/products/x?y=1#top"), "/products/x?y=1#top");
+  assert.equal(safeReturnTo("/account/login?x=1"), "/account");
+  assert.equal(safeReturnTo(null), "/account");
+}
+
 testCheckoutUrl();
 testMoney();
 testSalePercent();
+testCompareAtComesFromCheapestVariant();
+testSafeReturnTo();
 console.log("audit-unit: all assertions passed");

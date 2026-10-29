@@ -1,4 +1,7 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { linkCartToCustomer } from "@/lib/cart";
+import { CART_COOKIE } from "@/lib/cart-cookie";
 import { safeReturnTo } from "@/lib/favourites";
 import { getCustomerAccountConfig } from "./config";
 import { getCustomerAccountDiscovery } from "./discovery";
@@ -93,7 +96,71 @@ function toSession(
     refreshToken: token.refresh_token,
     expiresAt: Date.now() + seconds * 1000,
     idToken: token.id_token || previous?.idToken,
+    storefrontToken: previous?.storefrontToken,
   };
+}
+
+/**
+ * Exchanges a Customer Account API token for a Storefront API customer token,
+ * which the cart's buyerIdentity needs. Returns undefined on failure: linking
+ * the cart is an enhancement and must never block login.
+ */
+async function createStorefrontCustomerToken(
+  accessToken: string,
+): Promise<string | undefined> {
+  try {
+    const { graphqlUrl } = await getCustomerAccountDiscovery();
+    const response = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: accessToken,
+      },
+      body: JSON.stringify({
+        query: `mutation StorefrontCustomerAccessTokenCreate {
+          storefrontCustomerAccessTokenCreate {
+            customerAccessToken
+            userErrors { message }
+          }
+        }`,
+      }),
+      cache: "no-store",
+    });
+
+    const json = (await response.json()) as {
+      data?: {
+        storefrontCustomerAccessTokenCreate?: {
+          customerAccessToken: string | null;
+          userErrors: { message: string }[];
+        };
+      };
+    };
+    const result = json.data?.storefrontCustomerAccessTokenCreate;
+    if (!response.ok || !result?.customerAccessToken) {
+      console.error(
+        "[account] storefront token not issued",
+        result?.userErrors ?? response.status,
+      );
+      return undefined;
+    }
+    return result.customerAccessToken;
+  } catch (error) {
+    console.error("[account] storefront token failed", error);
+    return undefined;
+  }
+}
+
+/** Links the shopper's existing cart (if any) to their account; best effort. */
+async function linkCurrentCart(storefrontToken: string) {
+  const cartId = (await cookies()).get(CART_COOKIE)?.value;
+  if (!cartId) {
+    return;
+  }
+  try {
+    await linkCartToCustomer(cartId, storefrontToken);
+  } catch (error) {
+    console.error("[account] cart link failed", error);
+  }
 }
 
 export async function completeCustomerAuthorization(input: {
@@ -117,7 +184,13 @@ export async function completeCustomerAuthorization(input: {
   });
 
   const token = await postToken(body);
-  const session = toSession(token);
+  const session = {
+    ...toSession(token),
+    storefrontToken: await createStorefrontCustomerToken(token.access_token),
+  };
+  if (session.storefrontToken) {
+    await linkCurrentCart(session.storefrontToken);
+  }
   const returnTo = safeReturnTo(pkce.returnTo);
 
   const response = NextResponse.redirect(

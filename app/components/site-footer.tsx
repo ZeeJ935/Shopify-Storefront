@@ -20,6 +20,9 @@ export default function SiteFooter({
   navLinks = [],
   brandTiles = [],
 }: SiteFooterProps) {
+  const liveSocialLinks = socialLinks.filter((link) => !link.demo);
+  const liveLegalLinks = legalLinks.filter((link) => !link.demo);
+
   return (
     <footer className="mt-auto bg-ink text-snow">
       <SiteContainer className="py-12">
@@ -53,7 +56,8 @@ export default function SiteFooter({
             }
 
             const links = column.links.filter((link) => {
-              if (link.demo && link.href === "/#") return true;
+              // Demo placeholders point nowhere; drop the flag in site-content once real.
+              if (link.demo) return false;
               if (column.title === "Shop") {
                 if (link.href === "/cart" || link.href === "/collections/all") {
                   return true;
@@ -84,9 +88,6 @@ export default function SiteFooter({
                         className="inline-flex min-h-11 items-center text-sm text-snow/90 hover:underline"
                       >
                         {link.label}
-                        {link.demo ? (
-                          <span className="sr-only"> (demo)</span>
-                        ) : null}
                       </Link>
                     </li>
                   ))}
@@ -98,33 +99,35 @@ export default function SiteFooter({
 
         <div className="mt-12 flex flex-col gap-6 border-t border-snow/15 pt-8 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-mist">{paymentMethodsLabel}</p>
-          <ul className="flex flex-wrap gap-4 text-sm">
-            {socialLinks.map((s) => (
-              <li key={s.label}>
-                <a
-                  href={s.href}
-                  className="text-mist hover:text-snow hover:underline"
-                  aria-label={`${s.label} (demo placeholder)`}
-                >
-                  {s.label}
-                </a>
-              </li>
-            ))}
-          </ul>
+          {liveSocialLinks.length > 0 ? (
+            <ul className="flex flex-wrap gap-4 text-sm">
+              {liveSocialLinks.map((s) => (
+                <li key={s.label}>
+                  <a
+                    href={s.href}
+                    className="text-mist hover:text-snow hover:underline"
+                  >
+                    {s.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
 
         <div className="mt-6 flex flex-col gap-3 border-t border-snow/10 pt-6 text-xs text-mist sm:flex-row sm:items-center sm:justify-between">
           <p>© {shopName}</p>
-          <ul className="flex gap-4">
-            {legalLinks.map((l) => (
-              <li key={l.label}>
-                <Link href={l.href} className="hover:text-snow hover:underline">
-                  {l.label}
-                  {l.demo ? <span className="sr-only"> (demo)</span> : null}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {liveLegalLinks.length > 0 ? (
+            <ul className="flex gap-4">
+              {liveLegalLinks.map((l) => (
+                <li key={l.label}>
+                  <Link href={l.href} className="hover:text-snow hover:underline">
+                    {l.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </SiteContainer>
     </footer>

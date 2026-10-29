@@ -26,10 +26,29 @@ export function parseFavouriteIds(raw: unknown): string[] {
   return [];
 }
 
+const RETURN_TO_BASE = "https://return-to.invalid";
+
+/**
+ * An on-site path to send the shopper back to, else "/account". The path is
+ * resolved the way a browser would, so `//host`, `/\host` and paths with
+ * tabs/newlines (all of which can resolve off-site) are rejected.
+ */
 export function safeReturnTo(path: string | null | undefined): string {
-  if (!path || !path.startsWith("/") || path.startsWith("//")) {
+  if (!path || !path.startsWith("/")) {
     return "/account";
   }
+
+  let resolved: URL;
+  try {
+    resolved = new URL(path, RETURN_TO_BASE);
+  } catch {
+    return "/account";
+  }
+  if (resolved.origin !== RETURN_TO_BASE) {
+    return "/account";
+  }
+  path = `${resolved.pathname}${resolved.search}${resolved.hash}`;
+
   if (
     path.startsWith("/account/authorize") ||
     path.startsWith("/account/callback") ||

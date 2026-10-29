@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+// Lets an expired session's refresh redirect escape the catch blocks below.
+import { unstable_rethrow } from "next/navigation";
 import {
   createCustomerAddress,
   deleteCustomerAddress,
@@ -55,6 +57,7 @@ export async function createAddressAction(
       ? { ok: true, message: "Address added." }
       : result;
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message: error instanceof Error ? error.message : "Could not add address.",
@@ -84,6 +87,7 @@ export async function updateAddressAction(
       ? { ok: true, message: "Address updated." }
       : result;
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message:
@@ -103,6 +107,7 @@ export async function setDefaultAddressAction(
       ? { ok: true, message: "Default address updated." }
       : result;
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message:
@@ -125,6 +130,7 @@ export async function deleteAddressAction(
       ? { ok: true, message: "Address deleted." }
       : result;
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message:

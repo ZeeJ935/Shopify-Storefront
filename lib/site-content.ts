@@ -215,17 +215,20 @@ export const footerColumns: FooterColumn[] = [
   },
 ];
 
+/** A footer link; `demo` ones are hidden until given a real href. */
+export type SiteLink = { label: string; href: string; demo?: boolean };
+
 /** Demo social placeholders — not live profiles */
-export const socialLinks = [
-  { label: "Instagram", href: "#", demo: true as const },
-  { label: "X / Twitter", href: "#", demo: true as const },
-  { label: "YouTube", href: "#", demo: true as const },
+export const socialLinks: SiteLink[] = [
+  { label: "Instagram", href: "#", demo: true },
+  { label: "X / Twitter", href: "#", demo: true },
+  { label: "YouTube", href: "#", demo: true },
 ];
 
 export const paymentMethodsLabel =
   "Visa · Mastercard · Amex · Shop Pay · Apple Pay · Google Pay";
 
-export const legalLinks = [
-  { label: "Privacy", href: "/#", demo: true as const },
-  { label: "Terms", href: "/#", demo: true as const },
+export const legalLinks: SiteLink[] = [
+  { label: "Privacy", href: "/#", demo: true },
+  { label: "Terms", href: "/#", demo: true },
 ];

@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { NextResponse } from "next/server";
+import { CART_COOKIE, cartCookieClearOptions } from "@/lib/cart-cookie";
 import { buildCustomerLogoutUrl } from "@/lib/customer-account/oauth";
 import {
   clearCustomerSessionCookies,
@@ -23,6 +24,9 @@ export async function POST(request: Request) {
 
   const response = NextResponse.redirect(logoutUrl, 303);
   clearCustomerSessionCookies(response);
+  // The cart is linked to this customer; don't leave it for the next person
+  // on a shared device to check out under their account.
+  response.cookies.set(CART_COOKIE, "", cartCookieClearOptions());
   return response;
 }
 
