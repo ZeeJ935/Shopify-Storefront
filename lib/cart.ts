@@ -44,6 +44,9 @@ type CartLineNode = {
   merchandise: {
     id: string;
     title: string;
+    availableForSale: boolean;
+    currentlyNotInStock: boolean;
+    quantityAvailable: number | null;
     image: {
       url: string;
       altText: string | null;
@@ -126,6 +129,9 @@ const cartFields = `
           ... on ProductVariant {
             id
             title
+            availableForSale
+            currentlyNotInStock
+            quantityAvailable
             image {
               url
               altText
@@ -193,6 +199,30 @@ function flattenCart(cart: CartQueryCart) {
 export type Cart = ReturnType<typeof flattenCart>;
 export type CartLine = Cart["lines"][number];
 
+/**
+ * Non-blocking notices from cart mutations. For stock, Shopify caps the line
+ * at what's available and reports it here instead of in userErrors.
+ */
+export type CartWarning = {
+  code: string;
+  message: string;
+  /** Usually the affected cart line id. */
+  target: string;
+};
+
+export type CartMutationResult = {
+  cart: Cart;
+  warnings: CartWarning[];
+};
+
+const warningFields = `
+  warnings {
+    code
+    message
+    target
+  }
+`;
+
 /** Blanks an unsafe checkout URL before the cart is sent to the browser. */
 export function toClientCart(cart: Cart): Cart {
   const safe = isSafeShopifyCheckoutUrl(
@@ -220,7 +250,9 @@ function assertUpdateQuantity(quantity: number) {
 }
 
 /** Creates a cart, optionally with initial lines, in a single request. */
-export async function createCart(lines: CartLineInput[] = []) {
+export async function createCart(
+  lines: CartLineInput[] = [],
+): Promise<CartMutationResult> {
   for (const line of lines) {
     assertNonEmptyId(line.merchandiseId, "Merchandise ID");
     assertUpdateQuantity(line.quantity);
@@ -230,6 +262,7 @@ export async function createCart(lines: CartLineInput[] = []) {
     cartCreate: {
       cart: CartQueryCart | null;
       userErrors: { message: string }[];
+      warnings: CartWarning[];
     };
   }>(
     `mutation CartCreate($input: CartInput) {
@@ -240,6 +273,7 @@ export async function createCart(lines: CartLineInput[] = []) {
         userErrors {
           message
         }
+        ${warningFields}
       }
     }`,
     {
@@ -252,7 +286,7 @@ export async function createCart(lines: CartLineInput[] = []) {
     },
   );
 
-  const { cart, userErrors } = data.cartCreate;
+  const { cart, userErrors, warnings } = data.cartCreate;
 
   if (userErrors.length > 0) {
     throw new Error(userErrors.map((error) => error.message).join(", "));
@@ -262,14 +296,14 @@ export async function createCart(lines: CartLineInput[] = []) {
     throw new Error("Shopify did not return a cart.");
   }
 
-  return flattenCart(cart);
+  return { cart: flattenCart(cart), warnings };
 }
 
 export async function addToCart(
   cartId: string,
   merchandiseId: string,
   quantity: number = 1,
-) {
+): Promise<CartMutationResult> {
   assertNonEmptyId(cartId, "Cart ID");
   assertNonEmptyId(merchandiseId, "Merchandise ID");
   assertUpdateQuantity(quantity);
@@ -278,6 +312,7 @@ export async function addToCart(
     cartLinesAdd: {
       cart: CartQueryCart | null;
       userErrors: { message: string }[];
+      warnings: CartWarning[];
     };
   }>(
     `mutation CartLinesAdd(
@@ -291,6 +326,7 @@ export async function addToCart(
         userErrors {
           message
         }
+        ${warningFields}
       }
     }`,
     {
@@ -304,7 +340,7 @@ export async function addToCart(
     },
   );
 
-  const { cart, userErrors } = data.cartLinesAdd;
+  const { cart, userErrors, warnings } = data.cartLinesAdd;
 
   if (userErrors.length > 0) {
     throw new Error(userErrors.map((error) => error.message).join(", "));
@@ -314,7 +350,7 @@ export async function addToCart(
     throw new Error("Shopify did not return the updated cart.");
   }
 
-  return flattenCart(cart);
+  return { cart: flattenCart(cart), warnings };
 }
 
 export async function getCart(cartId: string) {
@@ -340,7 +376,7 @@ export async function getCart(cartId: string) {
 export async function updateCartLines(
   cartId: string,
   lines: CartLineUpdateInput[],
-) {
+): Promise<CartMutationResult> {
   assertNonEmptyId(cartId, "Cart ID");
 
   if (lines.length === 0) {
@@ -356,6 +392,7 @@ export async function updateCartLines(
     cartLinesUpdate: {
       cart: CartQueryCart | null;
       userErrors: { message: string }[];
+      warnings: CartWarning[];
     };
   }>(
     `mutation CartLinesUpdate(
@@ -369,6 +406,7 @@ export async function updateCartLines(
         userErrors {
           message
         }
+        ${warningFields}
       }
     }`,
     {
@@ -380,7 +418,7 @@ export async function updateCartLines(
     },
   );
 
-  const { cart, userErrors } = data.cartLinesUpdate;
+  const { cart, userErrors, warnings } = data.cartLinesUpdate;
 
   if (userErrors.length > 0) {
     throw new Error(userErrors.map((error) => error.message).join(", "));
@@ -390,7 +428,7 @@ export async function updateCartLines(
     throw new Error("Shopify did not return the updated cart.");
   }
 
-  return flattenCart(cart);
+  return { cart: flattenCart(cart), warnings };
 }
 
 export async function removeCartLine(cartId: string, lineId: string) {

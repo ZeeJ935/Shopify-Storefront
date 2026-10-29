@@ -19,9 +19,11 @@ import {
   removeItem as removeItemAction,
   updateItems,
   type CartActionResult,
+  type CartLineNotice,
 } from "@/app/cart/actions";
 import type { Cart } from "@/lib/cart";
 import { multiplyMoney, sumMoney } from "@/lib/money";
+import { maxPurchasable } from "@/lib/stock";
 import { useStorefrontToast } from "./storefront-toast";
 
 const DEBOUNCE_MS = 350;
@@ -37,6 +39,8 @@ type CartContextValue = {
   pending: boolean;
   pendingLineIds: ReadonlySet<string>;
   lineErrors: Readonly<Record<string, string>>;
+  /** Informational messages from Shopify, e.g. a quantity capped by stock. */
+  lineNotices: Readonly<Record<string, string>>;
   /** Accepts a server-rendered cart unless the client already holds a newer one. */
   seed: (cart: Cart | null) => void;
   /** Fetches the cart once if nothing has loaded it yet (e.g. drawer opened first). */
@@ -147,6 +151,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [overrides, setOverrides] = useState<Record<string, number>>({});
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
+  const [lineNotices, setLineNotices] = useState<Record<string, string>>({});
   const [inFlight, setInFlight] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -183,6 +188,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
+  }, []);
+
+  const showNotices = useCallback((notices: CartLineNotice[]) => {
+    if (notices.length === 0) {
+      return;
+    }
+    setLineNotices((prev) => ({
+      ...prev,
+      ...Object.fromEntries(
+        notices.map((notice) => [notice.lineId, notice.message]),
+      ),
+    }));
   }, []);
 
   const enqueue = useCallback(<T,>(task: () => Promise<T>) => {
@@ -243,6 +260,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
       if (result.success) {
         commit(result.cart);
+        // Shopify may save less than asked (stock); its quantity wins unless
+        // the shopper has edited the line again since.
+        setOverrides((prev) =>
+          lines.reduce(
+            (next, line) =>
+              next[line.id] === line.quantity ? withoutKey(next, line.id) : next,
+            prev,
+          ),
+        );
+        showNotices(result.notices);
         return;
       }
 
@@ -264,20 +291,26 @@ export function CartProvider({ children }: { children: ReactNode }) {
         ...Object.fromEntries(ids.map((id) => [id, result.message])),
       }));
     });
-  }, [commit, enqueue, fail]);
+  }, [commit, enqueue, fail, showNotices]);
 
   const setQuantity = useCallback(
     (lineId: string, quantity: number) => {
       if (!Number.isFinite(quantity)) {
         return;
       }
-      const clamped = Math.min(99, Math.max(1, Math.trunc(quantity)));
+      const line = confirmedRef.current?.lines.find((item) => item.id === lineId);
+      // Never ask for more than is on hand; keep a sold-out line's quantity editable down.
+      const max = line
+        ? Math.max(1, maxPurchasable(line.merchandise))
+        : 99;
+      const clamped = Math.min(max, Math.max(1, Math.trunc(quantity)));
 
       dirtyRef.current.set(lineId, clamped);
       setOverrides((prev) =>
         prev[lineId] === clamped ? prev : { ...prev, [lineId]: clamped },
       );
       setLineErrors((prev) => withoutKey(prev, lineId));
+      setLineNotices((prev) => withoutKey(prev, lineId));
 
       if (debounceRef.current) {
         window.clearTimeout(debounceRef.current);
@@ -292,6 +325,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       dirtyRef.current.delete(lineId);
       setOverrides((prev) => withoutKey(prev, lineId));
       setLineErrors((prev) => withoutKey(prev, lineId));
+      setLineNotices((prev) => withoutKey(prev, lineId));
       setRemovedIds((prev) =>
         prev.includes(lineId) ? prev : [...prev, lineId],
       );
@@ -320,11 +354,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
         const result = await safely(() => addItemAction(variantId, quantity));
         if (result.success) {
           commit(result.cart);
+          showNotices(result.notices);
           setDrawerOpen(true);
         }
         return result;
       }),
-    [commit, enqueue],
+    [commit, enqueue, showNotices],
   );
 
   const applyDiscount = useCallback(
@@ -427,6 +462,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       pending: inFlight > 0 || pendingLineIds.size > 0,
       pendingLineIds,
       lineErrors,
+      lineNotices,
       seed,
       ensureLoaded,
       setQuantity,
@@ -445,6 +481,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       inFlight,
       pendingLineIds,
       lineErrors,
+      lineNotices,
       seed,
       ensureLoaded,
       setQuantity,

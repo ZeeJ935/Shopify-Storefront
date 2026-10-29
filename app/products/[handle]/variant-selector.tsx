@@ -14,6 +14,7 @@ import PendingButtonLabel from "@/app/components/pending-button-label";
 import { useDelayedPending } from "@/app/hooks/use-delayed-pending";
 import { formatMoneyValue } from "@/lib/money";
 import type { ProductVariant } from "@/lib/products";
+import { isBackorder, lowStockCount, maxPurchasable } from "@/lib/stock";
 
 type VariantSelectorProps = {
   variants: ProductVariant[];
@@ -33,11 +34,15 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
     firstAvailable?.id ?? variants[0]?.id ?? "",
   );
   const [quantity, setQuantity] = useState(1);
-  const { addItem } = useCart();
+  const { addItem, cart, ensureLoaded } = useCart();
+
+  useEffect(() => {
+    ensureLoaded();
+  }, [ensureLoaded]);
   const [isPending, startTransition] = useTransition();
   const showPending = useDelayedPending(isPending);
   const [feedback, setFeedback] = useState<{
-    type: "success" | "error";
+    type: "success" | "notice" | "error";
     message: string;
   } | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -57,9 +62,24 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
   const hasAvailableVariant = variants.some(
     (variant) => variant.availableForSale,
   );
+  // What's already in the bag counts against stock. If the cart hasn't loaded
+  // on this page yet, Shopify's cart warnings still cap the add.
+  const inBag =
+    cart?.lines
+      .filter((line) => line.merchandise.id === selectedVariant?.id)
+      .reduce((sum, line) => sum + line.quantity, 0) ?? 0;
+  const remaining = selectedVariant
+    ? Math.max(0, maxPurchasable(selectedVariant) - inBag)
+    : 0;
+  const addQuantity = Math.min(quantity, Math.max(1, remaining));
+  const lowStock = selectedVariant ? lowStockCount(selectedVariant) : null;
+  const allInBag =
+    selectedVariant?.availableForSale === true && inBag > 0 && remaining === 0;
+
   const canAddToCart =
     Boolean(selectedVariant?.id) &&
     selectedVariant?.availableForSale === true &&
+    remaining > 0 &&
     !isPending;
 
   useEffect(() => {
@@ -204,16 +224,19 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
   }
 
   function handleAddToCart() {
-    if (!selectedVariant?.id || !selectedVariant.availableForSale) {
+    if (!selectedVariant?.id || !canAddToCart) {
       return;
     }
 
     setFeedback(null);
 
     startTransition(async () => {
-      const result = await addItem(selectedVariant.id, quantity);
+      const result = await addItem(selectedVariant.id, addQuantity);
 
-      if (result.success) {
+      if (result.success && result.notices.length > 0) {
+        // Stock capped the add; say so here as well as in the drawer.
+        setFeedback({ type: "notice", message: result.notices[0].message });
+      } else if (result.success) {
         // The cart drawer opens with the item; this line is for screen readers.
         setFeedback({
           type: "success",
@@ -319,10 +342,17 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
           </div>
         )}
 
-        <p className="mt-2 text-sm text-steel" aria-live="polite">
-          {selectedVariant?.availableForSale
-            ? "Available for purchase"
-            : "Currently unavailable"}
+        <p
+          className={`mt-2 text-sm ${lowStock !== null ? "font-medium text-sale" : "text-steel"}`}
+          aria-live="polite"
+        >
+          {!selectedVariant?.availableForSale
+            ? "Sold out"
+            : isBackorder(selectedVariant)
+              ? "Available on backorder. Ships when back in stock."
+              : lowStock !== null
+                ? `Only ${lowStock} left`
+                : "In stock"}
         </p>
       </div>
 
@@ -359,18 +389,23 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
           id="quantity"
           type="number"
           min={1}
-          max={99}
-          value={quantity}
+          max={Math.max(1, remaining)}
+          value={addQuantity}
           onChange={(event) => {
             const next = Number(event.target.value);
             if (!Number.isFinite(next)) {
               return;
             }
-            setQuantity(Math.min(99, Math.max(1, Math.trunc(next))));
+            setQuantity(Math.min(Math.max(1, remaining), Math.max(1, Math.trunc(next))));
           }}
           className="field max-w-[8rem]"
-          disabled={isPending || !selectedVariant?.availableForSale}
+          disabled={isPending || remaining === 0}
         />
+        {allInBag ? (
+          <p className="mt-2 text-sm text-steel">
+            You have all {inBag} available in your bag.
+          </p>
+        ) : null}
       </div>
 
       <button
@@ -390,6 +425,9 @@ export default function VariantSelector({ variants }: VariantSelectorProps) {
       <div role="status" aria-live="polite" className="min-h-5">
         {feedback?.type === "error" && (
           <p className="text-sm text-danger">{feedback.message}</p>
+        )}
+        {feedback?.type === "notice" && (
+          <p className="text-sm text-steel">{feedback.message}</p>
         )}
         {feedback?.type === "success" && (
           <p className="sr-only">{feedback.message}</p>

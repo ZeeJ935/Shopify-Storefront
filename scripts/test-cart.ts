@@ -25,13 +25,13 @@ async function main() {
     throw new Error("No available variants for this product.");
   }
 
-  const cart = await createCart();
+  const { cart } = await createCart();
 
   console.log("Cart created:", {
     totalQuantity: cart.totalQuantity,
   });
 
-  const updatedCart = await addToCart(
+  const { cart: updatedCart, warnings } = await addToCart(
     cart.id,
     variant.id,
     1
@@ -41,6 +41,7 @@ async function main() {
     totalQuantity: updatedCart.totalQuantity,
     variant: variant.title,
     price: variant.price,
+    warnings,
   });
 
   console.log("Checkout URL:", updatedCart.checkoutUrl);

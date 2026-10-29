@@ -10,6 +10,7 @@ import {
   updateCartDiscountCodes,
   updateCartLines,
   type Cart,
+  type CartMutationResult,
 } from "@/lib/cart";
 import {
   CART_COOKIE,
@@ -23,9 +24,14 @@ const INVALID_DISCOUNT_MESSAGE =
 const CART_GONE_MESSAGE =
   "Your cart is no longer available. Add items from the store to start a new one.";
 
+/** Something the shopper should know about a line, e.g. stock capped it. */
+export type CartLineNotice = { lineId: string; message: string };
+
 export type CartActionResult =
-  | { success: true; cart: Cart }
+  | { success: true; cart: Cart; notices: CartLineNotice[] }
   | { success: false; message: string; cartGone?: boolean };
+
+const SOLD_OUT_MESSAGE = "Sorry, this item just sold out.";
 
 export type CartLineQuantity = { id: string; quantity: number };
 
@@ -85,8 +91,49 @@ async function cartGone(): Promise<CartActionResult> {
   return { success: false, message: CART_GONE_MESSAGE, cartGone: true };
 }
 
-function ok(cart: Cart): CartActionResult {
-  return { success: true, cart: toClientCart(cart) };
+function toNotices({ cart, warnings }: CartMutationResult): CartLineNotice[] {
+  return warnings.map((warning) => {
+    const line = cart.lines.find((item) => item.id === warning.target);
+
+    if (warning.code === "MERCHANDISE_NOT_ENOUGH_STOCK" && line) {
+      return {
+        lineId: warning.target,
+        message: `Only ${line.quantity} available. We've updated your bag.`,
+      };
+    }
+    if (warning.code === "MERCHANDISE_OUT_OF_STOCK") {
+      return { lineId: warning.target, message: SOLD_OUT_MESSAGE };
+    }
+    return { lineId: warning.target, message: warning.message };
+  });
+}
+
+function ok(result: Cart | CartMutationResult): CartActionResult {
+  if ("warnings" in result) {
+    return {
+      success: true,
+      cart: toClientCart(result.cart),
+      notices: toNotices(result),
+    };
+  }
+  return { success: true, cart: toClientCart(result), notices: [] };
+}
+
+/** Shopify accepts an add of sold-out stock but leaves it out of the cart. */
+function addResult(
+  result: CartMutationResult,
+  variantId: string,
+): CartActionResult {
+  const added = result.cart.lines.some(
+    (line) => line.merchandise.id === variantId,
+  );
+  const soldOut = result.warnings.some(
+    (warning) => warning.code === "MERCHANDISE_OUT_OF_STOCK",
+  );
+  if (!added && soldOut) {
+    return { success: false, message: SOLD_OUT_MESSAGE };
+  }
+  return ok(result);
 }
 
 /** Read-only: the current cart for client hydration, or null when there is none. */
@@ -108,12 +155,12 @@ async function createCartWithItem(
   variantId: string,
   quantity: number,
 ): Promise<CartActionResult> {
-  const cart = await createCart([{ merchandiseId: variantId, quantity }]);
+  const result = await createCart([{ merchandiseId: variantId, quantity }]);
 
   const cookieStore = await cookies();
-  cookieStore.set(CART_COOKIE, cart.id, cartCookieSetOptions());
+  cookieStore.set(CART_COOKIE, result.cart.id, cartCookieSetOptions());
 
-  return ok(cart);
+  return addResult(result, variantId);
 }
 
 export async function addItem(
@@ -136,7 +183,10 @@ export async function addItem(
 
   if (existingCartId) {
     try {
-      return ok(await addToCart(existingCartId, trimmedVariantId, quantity));
+      return addResult(
+        await addToCart(existingCartId, trimmedVariantId, quantity),
+        trimmedVariantId,
+      );
     } catch (error) {
       if (!isInvalidCartError(error)) {
         return {

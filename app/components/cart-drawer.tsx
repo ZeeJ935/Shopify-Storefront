@@ -5,6 +5,7 @@ import { useEffect, useId, useRef } from "react";
 import CartLineItem from "@/app/cart/cart-line-item";
 import CheckoutButton from "@/app/cart/checkout-button";
 import { formatMoneyValue } from "@/lib/money";
+import { hasStockIssues } from "@/lib/stock";
 import { useCart } from "./cart-provider";
 import Skeleton from "./skeleton";
 import Spinner from "./spinner";
@@ -162,7 +163,10 @@ export default function CartDrawer() {
             <p className="mt-2 text-xs text-steel">
               Before discounts. Shipping and taxes calculated at checkout.
             </p>
-            <CheckoutButton checkoutUrl={cart.checkoutUrl} />
+            <CheckoutButton
+              checkoutUrl={cart.checkoutUrl}
+              stockBlocked={hasStockIssues(cart.lines)}
+            />
             <Link
               href="/cart"
               className="mt-3 flex min-h-11 items-center justify-center text-sm font-medium text-steel underline-offset-4 hover:text-ink hover:underline"

@@ -7,6 +7,7 @@ import SiteContainer from "@/app/components/site-container";
 import Spinner from "@/app/components/spinner";
 import type { Cart } from "@/lib/cart";
 import { formatMoneyValue } from "@/lib/money";
+import { hasStockIssues } from "@/lib/stock";
 import CartLineItem from "./cart-line-item";
 import CheckoutButton from "./checkout-button";
 import DiscountCodeForm from "./discount-code-form";
@@ -120,7 +121,10 @@ export default function CartView({
 
           <DiscountCodeForm discountCodes={cart.discountCodes} />
 
-          <CheckoutButton checkoutUrl={cart.checkoutUrl} />
+          <CheckoutButton
+            checkoutUrl={cart.checkoutUrl}
+            stockBlocked={hasStockIssues(cart.lines)}
+          />
 
           <Link
             href="/collections/all"

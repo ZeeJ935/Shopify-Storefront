@@ -14,6 +14,9 @@ export type ProductVariant = {
   id: string;
   title: string;
   availableForSale: boolean;
+  /** Stock fields are only fetched for the product page. */
+  quantityAvailable?: number | null;
+  currentlyNotInStock?: boolean;
   price: MoneyValue;
   compareAtPrice: MoneyValue | null;
   selectedOptions: {
@@ -146,6 +149,8 @@ const PRODUCT_DETAIL_FIELDS = `
     edges {
       node {
         ${VARIANT_FIELDS}
+        quantityAvailable
+        currentlyNotInStock
       }
     }
   }
@@ -170,6 +175,8 @@ type ProductNode = {
         id: string;
         title: string;
         availableForSale: boolean;
+        quantityAvailable?: number | null;
+        currentlyNotInStock?: boolean;
         price: MoneyValue;
         compareAtPrice: MoneyValue | null;
         selectedOptions: { name: string; value: string }[];

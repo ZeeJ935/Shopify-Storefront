@@ -9,18 +9,27 @@ type CartLineControlsProps = {
   lineId: string;
   productTitle: string;
   quantity: number;
+  /** Most the shopper may hold (stock-capped); 0 when sold out. */
+  max: number;
+  /** Stock problem that blocks checkout, e.g. sold out since it was added. */
+  stockIssue: string | null;
 };
 
 export default function CartLineControls({
   lineId,
   productTitle,
   quantity,
+  max,
+  stockIssue,
 }: CartLineControlsProps) {
-  const { setQuantity, removeLine, pendingLineIds, lineErrors } = useCart();
+  const { setQuantity, removeLine, pendingLineIds, lineErrors, lineNotices } =
+    useCart();
   const [draftValue, setDraftValue] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const showPending = useDelayedPending(pendingLineIds.has(lineId));
   const error = lineErrors[lineId] ?? null;
+  const notice = lineNotices[lineId] ?? null;
+  const ceiling = Math.max(1, max);
 
   const inputValue = draftValue ?? String(quantity);
 
@@ -29,12 +38,16 @@ export default function CartLineControls({
     if (!Number.isFinite(next)) {
       return;
     }
-    const clamped = Math.min(99, Math.max(1, Math.trunc(next)));
+    const clamped = Math.min(ceiling, Math.max(1, Math.trunc(next)));
     if (clamped === quantity) {
       return;
     }
     setQuantity(lineId, clamped);
-    setAnnouncement(`Quantity updated to ${clamped} for ${productTitle}.`);
+    setAnnouncement(
+      clamped < Math.trunc(next)
+        ? `Only ${clamped} available. Quantity set to ${clamped} for ${productTitle}.`
+        : `Quantity updated to ${clamped} for ${productTitle}.`,
+    );
   }
 
   function handleRemove() {
@@ -63,7 +76,7 @@ export default function CartLineControls({
             id={`quantity-${lineId}`}
             type="number"
             min={1}
-            max={99}
+            max={ceiling}
             value={inputValue}
             aria-label={`Quantity of ${productTitle}`}
             onChange={(event) => setDraftValue(event.target.value)}
@@ -78,7 +91,7 @@ export default function CartLineControls({
           <button
             type="button"
             onClick={() => changeQuantity(quantity + 1)}
-            disabled={quantity >= 99}
+            disabled={quantity >= max}
             aria-label={`Increase quantity of ${productTitle}`}
             className="inline-flex h-11 w-11 items-center justify-center text-base text-ink transition-colors hover:bg-mist/60 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -97,11 +110,19 @@ export default function CartLineControls({
         </button>
       </div>
 
-      {error && (
+      {error ? (
         <p className="text-sm text-danger" role="alert">
           {error}
         </p>
-      )}
+      ) : stockIssue ? (
+        <p className="text-sm text-danger" role="alert">
+          {stockIssue}
+        </p>
+      ) : notice ? (
+        <p className="text-sm text-steel" role="status">
+          {notice}
+        </p>
+      ) : null}
 
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}

@@ -5,6 +5,12 @@ import Link from "next/link";
 import Spinner from "@/app/components/spinner";
 import type { CartLine } from "@/lib/cart";
 import { formatMoneyValue } from "@/lib/money";
+import {
+  isBackorder,
+  lineStockIssue,
+  lowStockCount,
+  maxPurchasable,
+} from "@/lib/stock";
 import CartLineControls from "./cart-line-controls";
 
 type CartLineItemProps = {
@@ -70,6 +76,8 @@ export default function CartLineItem({
     .map(allocationLabel)
     .find(Boolean);
   const productHref = `/products/${line.merchandise.product.handle}`;
+  const stockIssue = lineStockIssue(line.merchandise, line.quantity);
+  const lowStock = lowStockCount(line.merchandise);
 
   return (
     <li
@@ -135,12 +143,23 @@ export default function CartLineItem({
           {allocationNote ? (
             <p className="mt-1 text-xs text-steel">Includes {allocationNote}</p>
           ) : null}
+          {isBackorder(line.merchandise) ? (
+            <p className="mt-1 text-xs text-steel">
+              On backorder. Ships when back in stock.
+            </p>
+          ) : lowStock !== null && !stockIssue ? (
+            <p className="mt-1 text-xs font-medium text-sale">
+              Only {lowStock} left
+            </p>
+          ) : null}
         </div>
 
         <CartLineControls
           lineId={line.id}
           productTitle={line.merchandise.product.title}
           quantity={line.quantity}
+          max={maxPurchasable(line.merchandise)}
+          stockIssue={stockIssue}
         />
 
         {compact ? <LineTotal line={line} pending={pending} /> : null}
