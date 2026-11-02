@@ -111,6 +111,33 @@ export default async function Home() {
         </section>
       )}
 
+      {/* Sale strip */}
+      {sale && sale.length > 0 && (
+        <section className="bg-ink py-16 text-snow lg:py-24">
+          <SiteContainer>
+            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h2 className="display-section">On sale</h2>
+                <p className="mt-2 text-mist">
+                  Reduced styles with real compare-at pricing.
+                </p>
+              </div>
+              <Link
+                href="/collections/sale"
+                className="btn border border-snow bg-transparent text-snow hover:bg-snow/10"
+              >
+                Shop sale
+              </Link>
+            </div>
+            <ProductCarousel
+              products={sale}
+              label="Sale products"
+              tone="dark"
+            />
+          </SiteContainer>
+        </section>
+      )}
+
       {/* Shop by category */}
       {catalog.productTypeTiles.length > 0 && (
         <section className="bg-white py-14 lg:py-20">
@@ -204,33 +231,6 @@ export default async function Home() {
               </Link>
             </div>
             <ProductCarousel products={newest} label="New arrivals" />
-          </SiteContainer>
-        </section>
-      )}
-
-      {/* Sale strip */}
-      {sale && sale.length > 0 && (
-        <section className="bg-ink py-16 text-snow lg:py-24">
-          <SiteContainer>
-            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <h2 className="display-section">On sale</h2>
-                <p className="mt-2 text-mist">
-                  Reduced styles with real compare-at pricing.
-                </p>
-              </div>
-              <Link
-                href="/collections/sale"
-                className="btn border border-snow bg-transparent text-snow hover:bg-snow/10"
-              >
-                Shop sale
-              </Link>
-            </div>
-            <ProductCarousel
-              products={sale}
-              label="Sale products"
-              tone="dark"
-            />
           </SiteContainer>
         </section>
       )}
