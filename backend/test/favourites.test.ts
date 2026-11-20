@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { fakeCustomers, fakeFavourites } from "./fakes.js";
+import { fakeCustomers, fakeFavourites, fakeWebhooks } from "./fakes.js";
 
 const TOKEN = "t".repeat(48);
 const CUSTOMER = "10000000000001";
@@ -16,7 +16,7 @@ afterEach(async () => {
 
 function setup() {
   const favourites = fakeFavourites();
-  app = buildApp({ serviceToken: TOKEN, customers: fakeCustomers(), favourites, pingDb: async () => {} });
+  app = buildApp({ serviceToken: TOKEN, webhooks: fakeWebhooks().deps, customers: fakeCustomers(), favourites, pingDb: async () => {} });
   return { app, favourites };
 }
 

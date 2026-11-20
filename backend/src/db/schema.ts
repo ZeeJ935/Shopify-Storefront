@@ -1,4 +1,4 @@
-import { bigserial, index, pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
+import { bigserial, index, integer, jsonb, pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
 
 /**
  * One row per Shopify customer the storefront has sent us.
@@ -31,4 +31,27 @@ export const favourites = pgTable(
     unique("favourites_customer_product_unique").on(t.customerId, t.productId),
     index("favourites_customer_id_idx").on(t.customerId),
   ],
+);
+
+/**
+ * Every Shopify webhook we accepted (valid signature), once per webhook ID.
+ * Catalog topics are processed by the queue; other topics are only recorded,
+ * without their payload, so customer or order data is never stored by accident.
+ */
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    webhookId: text("webhook_id").notNull().unique(),
+    topic: text("topic").notNull(),
+    shopDomain: text("shop_domain").notNull(),
+    payload: jsonb("payload"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    /** Set when the last allowed attempt failed; last_error keeps why. */
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (t) => [index("webhook_events_pending_idx").on(t.processedAt, t.failedAt)],
 );

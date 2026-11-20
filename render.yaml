@@ -23,6 +23,12 @@ services:
       # Render generates this; copy it into Vercel as BACKEND_SERVICE_TOKEN.
       - key: BACKEND_SERVICE_TOKEN
         generateValue: true
+      # Same value as the storefront's SHOPIFY_WEBHOOK_SECRET (Shopify admin → Notifications → Webhooks).
+      - key: SHOPIFY_WEBHOOK_SECRET
+        sync: false
+      # The storefront's public origin, e.g. https://shopify-storefront-ruby.vercel.app
+      - key: STOREFRONT_URL
+        sync: false
 
 databases:
   - name: zj-backend-db

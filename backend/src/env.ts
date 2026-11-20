@@ -3,6 +3,10 @@ export type Env = {
   port: number;
   databaseUrl: string;
   serviceToken: string;
+  /** Shopify webhook signing secret. Optional at start; webhooks get 500 until it's set. */
+  shopifyWebhookSecret?: string;
+  /** Storefront origin for cache clearing (POST /api/revalidate). */
+  storefrontUrl?: string;
 };
 
 /** Reads and validates the service's environment. Throws with a clear message when something is missing. */
@@ -19,5 +23,17 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error("PORT must be a valid port number.");
   }
 
-  return { host: source.HOST?.trim() || "127.0.0.1", port, databaseUrl, serviceToken };
+  const storefrontUrl = source.STOREFRONT_URL?.trim().replace(/\/+$/, "") || undefined;
+  if (storefrontUrl && !/^https?:\/\//.test(storefrontUrl)) {
+    throw new Error("STOREFRONT_URL must start with http:// or https://.");
+  }
+
+  return {
+    host: source.HOST?.trim() || "127.0.0.1",
+    port,
+    databaseUrl,
+    serviceToken,
+    shopifyWebhookSecret: source.SHOPIFY_WEBHOOK_SECRET?.trim() || undefined,
+    storefrontUrl,
+  };
 }

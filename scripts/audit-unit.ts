@@ -22,6 +22,7 @@ import {
   decodeJwtPayload,
 } from "../lib/customer-account/id-token";
 import { parseSessionPayload, seal, unseal } from "../lib/customer-account/seal";
+import { isServiceTokenValid } from "../lib/service-token";
 import {
   describeFavouritesError,
   loadFavourites,
@@ -651,6 +652,18 @@ async function testFavouritesErrorReporting() {
   assert.equal(describeFavouritesError("x".repeat(500)).length, 200);
 }
 
+function testServiceToken() {
+  const token = "s".repeat(48);
+  assert.equal(isServiceTokenValid(`Bearer ${token}`, token), true);
+  assert.equal(isServiceTokenValid(`Bearer ${token}x`, token), false);
+  assert.equal(isServiceTokenValid(`Bearer ${token.slice(1)}`, token), false);
+  assert.equal(isServiceTokenValid(token, token), false); // no "Bearer "
+  assert.equal(isServiceTokenValid("Bearer ", token), false);
+  assert.equal(isServiceTokenValid(null, token), false);
+  assert.equal(isServiceTokenValid(`Bearer ${token}`, undefined), false); // not configured
+  assert.equal(isServiceTokenValid("Bearer ", ""), false);
+}
+
 testRateLimiter();
 testSameOrigin();
 testShopifyWebhookSignature();
@@ -661,6 +674,7 @@ testCustomerIdFromIdToken();
 testSessionSealAndParse();
 testMergeForLogin();
 testPickFavouritesStore();
+testServiceToken();
 testLoadFavourites()
   .then(testFavouritesErrorReporting)
   .then(() => console.log("audit-unit: all assertions passed"))

@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { CATALOG_TAG } from "@/lib/shopify";
 import { CATALOG_TOPICS, verifyShopifyWebhook } from "@/lib/shopify-webhook";
 
+// TODO(remove after webhook switch verified): Shopify webhooks now go to the
+// backend (POST /webhooks/shopify), which records, dedupes and retries them, then
+// calls /api/revalidate. This route stays until every webhook URL is switched.
 /**
  * Shopify admin webhooks (Settings → Notifications → Webhooks) call this when
  * products, collections or stock change, so the catalog refreshes in seconds

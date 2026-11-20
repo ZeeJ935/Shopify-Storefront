@@ -77,7 +77,8 @@ Without this, the import can't read old favourites, and the fallback (no `BACKEN
 | `/account` · `/orders` · `/addresses` · `/profile` | Protected account |
 | `/account/favourites` | Favourites page (navbar heart; not in account tabs) |
 | `/api/predictive-search` · `/api/catalog` | Search drawer and infinite-scroll JSON (rate limited) |
-| `/api/webhooks/shopify` | Shopify webhook receiver (signed) |
+| `/api/webhooks/shopify` | Old Shopify webhook receiver (signed); replaced by the backend, removed after the switch |
+| `/api/revalidate` | Clears the catalog cache; called by the backend with `BACKEND_SERVICE_TOKEN` |
 
 `app/error.tsx` and `app/global-error.tsx` show a branded “Something went wrong” page with **Try again**.
 
@@ -122,16 +123,13 @@ Local Customer Account login needs an HTTPS callback that matches Admin (tunnel)
 
 ## Instant catalog updates (webhooks)
 
-Catalog data is cached and refreshed every 2 minutes as a backup. Shopify webhooks make edits show within seconds:
+Catalog data is cached and refreshed every 2 minutes as a backup. Shopify webhooks make edits show within seconds.
 
-1. Shopify admin → **Settings → Notifications → Webhooks → Create webhook**. Format **JSON**, URL `https://<your-site>/api/webhooks/shopify`. Create one for each event:
-   - Product creation, Product update, Product deletion
-   - Collection creation, Collection update, Collection deletion
-   - Inventory level update
-2. Copy the signing secret shown on that page ("Your webhooks will be signed with …") into `SHOPIFY_WEBHOOK_SECRET` in Vercel, then redeploy.
-3. Edit a product in admin and reload its page. Delivery status for each webhook is shown in admin.
+Webhooks now go to the **backend** (`POST /webhooks/shopify`): it checks the signature, records each event once (duplicates are dropped), processes it in a Postgres queue with retries, and then calls this app's `POST /api/revalidate` (protected by `BACKEND_SERVICE_TOKEN`) to clear the `catalog` cache tag. Setup, a signed `curl` example and how to point Shopify at it: **[backend/README.md → Shopify webhooks](backend/README.md#shopify-webhooks)**.
 
-The endpoint rejects unsigned requests (401) and refreshes all catalog data tagged `catalog` (`CATALOG_TAG` in `lib/shopify.ts`).
+Topics that refresh the catalog: product, collection and inventory level create/update/delete.
+
+The old route, `/api/webhooks/shopify` (needs `SHOPIFY_WEBHOOK_SECRET` here), still works until every webhook in Shopify points at the backend; it is marked for removal after that.
 
 ## Security notes
 

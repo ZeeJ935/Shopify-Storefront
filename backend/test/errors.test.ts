@@ -2,7 +2,7 @@ import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { safeError } from "../src/errors.js";
-import { fakeCustomers, fakeFavourites } from "./fakes.js";
+import { fakeCustomers, fakeFavourites, fakeWebhooks } from "./fakes.js";
 
 const TOKEN = "t".repeat(48);
 const CUSTOMER = "31300000000017";
@@ -42,6 +42,7 @@ describe("500 responses", () => {
     };
     const app = buildApp({
       serviceToken: TOKEN,
+      webhooks: fakeWebhooks().deps,
       customers: fakeCustomers(),
       favourites,
       pingDb: async () => {},
@@ -65,7 +66,7 @@ describe("500 responses", () => {
   });
 
   it("leave 4xx validation errors as before", async () => {
-    const app = buildApp({ serviceToken: TOKEN, customers: fakeCustomers(), favourites: fakeFavourites(), pingDb: async () => {} });
+    const app = buildApp({ serviceToken: TOKEN, webhooks: fakeWebhooks().deps, customers: fakeCustomers(), favourites: fakeFavourites(), pingDb: async () => {} });
     const res = await app.inject({
       method: "PUT",
       url: "/v1/favourites",

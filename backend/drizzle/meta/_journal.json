@@ -15,6 +15,13 @@
       "when": 1795176376967,
       "tag": "0001_favourites",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795180753686,
+      "tag": "0002_webhook_events",
+      "breakpoints": true
     }
   ]
 }

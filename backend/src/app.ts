@@ -3,6 +3,7 @@ import { requireServiceToken } from "./auth.js";
 import { safeError } from "./errors.js";
 import type { CustomersRepo } from "./db/client.js";
 import type { FavouritesRepo } from "./db/favourites.js";
+import { webhookRoutes, type WebhookRouteDeps } from "./routes/webhooks.js";
 import { favouritesRoutes } from "./routes/favourites.js";
 import { healthRoutes } from "./routes/health.js";
 import { meRoutes } from "./routes/me.js";
@@ -12,11 +13,12 @@ export type AppDeps = {
   customers: CustomersRepo;
   favourites: FavouritesRepo;
   pingDb: () => Promise<void>;
+  webhooks: WebhookRouteDeps;
   logger?: FastifyServerOptions["logger"];
 };
 
 /** Builds the app with its dependencies injected, so tests can run without a database. */
-export function buildApp({ serviceToken, customers, favourites, pingDb, logger = false }: AppDeps) {
+export function buildApp({ serviceToken, customers, favourites, pingDb, webhooks, logger = false }: AppDeps) {
   const app = Fastify({
     // Strict bodies: no type coercion ("1" for 1, "x" for ["x"]) and no silently dropped fields.
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
@@ -41,6 +43,9 @@ export function buildApp({ serviceToken, customers, favourites, pingDb, logger =
   });
 
   healthRoutes(app, pingDb);
+
+  // Public: Shopify signs these; the HMAC is the auth (no service token).
+  app.register((instance) => webhookRoutes(instance, webhooks));
 
   // Everything under /v1 needs the service token.
   app.register(

@@ -1,3 +1,4 @@
+// TODO(remove after webhook switch verified): only used by the old /api/webhooks/shopify route.
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /** Webhook topics whose changes the storefront's catalog cache must reflect. */
