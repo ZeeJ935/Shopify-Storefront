@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Walkthrough video toolkit (local only: recordings, voice files, saved logins)
+/video-kit/

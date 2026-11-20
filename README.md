@@ -33,7 +33,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Environment
 
-Copy from `.env.example`. Never prefix Storefront or Customer Account secrets with `NEXT_PUBLIC_`.
+Copy from `.env.example`. Never prefix Storefront, Customer Account or backend secrets with `NEXT_PUBLIC_`.
 
 | Variable | Purpose |
 |----------|---------|
@@ -48,6 +48,8 @@ Copy from `.env.example`. Never prefix Storefront or Customer Account secrets wi
 | `SHOPIFY_CUSTOMER_ACCOUNT_LOGOUT_REDIRECT_URL` | Optional; defaults to `SITE_URL` |
 | `SHOPIFY_WEBHOOK_SECRET` | Webhook signing secret (see [Instant catalog updates](#instant-catalog-updates-webhooks)) |
 | `SUPPORT_EMAIL` | Optional; shows a “Need help?” email button on order pages |
+| `BACKEND_URL` | Backend service origin (server-side only; see [backend/README.md](backend/README.md)) |
+| `BACKEND_SERVICE_TOKEN` | Shared secret for calling the backend; must match the backend's value |
 
 Full Admin steps (Headless channel, New customer accounts, favourites metafield): **[docs/customer-accounts-admin.md](docs/customer-accounts-admin.md)**.
 
@@ -86,6 +88,7 @@ app/           Pages, account OAuth routes, cart/favourites actions, API routes,
 lib/           Shopify Storefront + Customer Account clients, cart, catalog, stock, favourites
 proxy.ts       Rate limiting, logout origin check, account return path (Next 16 Proxy)
 docs/          Customer Account Admin setup, architecture audit
+backend/       Separate API service (Fastify + Postgres); only the Next.js server calls it
 scripts/       Local helpers (cart smoke, unit asserts) — run with npx tsx
 ```
 
@@ -109,7 +112,7 @@ npm test         # unit asserts (scripts/audit-unit.ts): checkout URL, money, sa
 npx tsx scripts/test-cart.ts <product-handle>   # live cart smoke test (hits Shopify)
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, typecheck and `npm test` on every push and pull request. It doesn't run `next build`: that prerenders pages from Shopify (needs store secrets), and Vercel builds every push anyway.
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, `npm test` and `next build` on every push and pull request. The build prerenders pages from Shopify, so it needs the Shopify variables as GitHub Actions secrets; without them (for example a pull request from a fork) the build step is skipped. A second job typechecks the backend, applies its migrations to a throwaway Postgres and runs its tests.
 
 ## Deploy
 
@@ -145,4 +148,4 @@ The endpoint rejects unsigned requests (401) and refreshes all catalog data tagg
 - No analytics / cookie consent
 - Single market: prices shown in the store currency, `en-US` formatting
 - Variants and images are capped per product (100 variants, 12 images on the product page)
-- No end-to-end (browser) tests; `next build` isn't part of CI
+- No end-to-end (browser) tests

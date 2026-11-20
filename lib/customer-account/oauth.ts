@@ -5,6 +5,7 @@ import { CART_COOKIE } from "@/lib/cart-cookie";
 import { safeReturnTo } from "@/lib/favourites";
 import { getCustomerAccountConfig } from "./config";
 import { getCustomerAccountDiscovery } from "./discovery";
+import { customerIdFromIdToken } from "./id-token";
 import {
   createCodeChallenge,
   createCodeVerifier,
@@ -97,7 +98,18 @@ function toSession(
     expiresAt: Date.now() + seconds * 1000,
     idToken: token.id_token || previous?.idToken,
     storefrontToken: previous?.storefrontToken,
+    customerId: previous?.customerId,
   };
+}
+
+/** The customer ID from a fresh ID token, checked against our client and Shopify's issuer. */
+async function customerIdFromToken(idToken: string | undefined) {
+  const config = getCustomerAccountConfig();
+  const { openid } = await getCustomerAccountDiscovery();
+  return customerIdFromIdToken(idToken, {
+    clientId: config.clientId,
+    issuer: openid.issuer || `https://shopify.com/authentication/${config.shopId}`,
+  });
 }
 
 /**
@@ -184,8 +196,14 @@ export async function completeCustomerAuthorization(input: {
   });
 
   const token = await postToken(body);
+  const customerId = await customerIdFromToken(token.id_token);
+  if (!customerId) {
+    // The callback route turns this into /account/login?error=oauth.
+    throw new Error("Login did not return a customer ID.");
+  }
   const session = {
     ...toSession(token),
+    customerId,
     storefrontToken: await createStorefrontCustomerToken(token.access_token),
   };
   if (session.storefrontToken) {
@@ -214,6 +232,14 @@ export async function refreshCustomerSessionTokens(
 
   const token = await postToken(body);
   const session = toSession(token, previous);
+  // A refresh may carry a new ID token; prefer its customer ID when it has one.
+  if (token.id_token) {
+    const refreshedId = await customerIdFromToken(token.id_token);
+    if (refreshedId && refreshedId !== previous.customerId) {
+      if (previous.customerId) console.warn("[account] customer ID changed on refresh");
+      session.customerId = refreshedId;
+    }
+  }
   // Re-issue the Storefront customer token alongside each refresh so cart
   // buyer identity never relies on a stale one; keep the old one on failure.
   const storefrontToken = await createStorefrontCustomerToken(

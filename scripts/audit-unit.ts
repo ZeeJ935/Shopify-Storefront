@@ -16,6 +16,12 @@ import {
   MAX_LINE_QUANTITY,
   maxPurchasable,
 } from "../lib/stock";
+import {
+  customerIdFromClaims,
+  customerIdFromIdToken,
+  decodeJwtPayload,
+} from "../lib/customer-account/id-token";
+import { parseSessionPayload, seal, unseal } from "../lib/customer-account/seal";
 
 const STORE = "zj-store-eer28nlk.myshopify.com";
 const CUSTOM = "shop.example.com";
@@ -406,10 +412,86 @@ function testStockRules() {
   assert.equal(lineStockIssue(backorder, 50), null);
 }
 
+// ---- Customer identity in the session ----
+
+const CLIENT_ID = "shp_test-client";
+const ISSUER = "https://shopify.com/authentication/12345";
+const SECRET = "x".repeat(48);
+
+function fakeJwt(claims: Record<string, unknown>) {
+  const part = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+  return `${part({ alg: "RS256", typ: "JWT" })}.${part(claims)}.signature`;
+}
+
+function testCustomerIdFromIdToken() {
+  const expected = { clientId: CLIENT_ID, issuer: ISSUER };
+  const good = { iss: ISSUER, aud: CLIENT_ID, sub: "10000000000001" };
+
+  assert.equal(customerIdFromIdToken(fakeJwt(good), expected), "10000000000001");
+  // Trailing slash on either side and aud as an array are both fine.
+  assert.equal(
+    customerIdFromIdToken(fakeJwt({ ...good, iss: `${ISSUER}/` }), expected),
+    "10000000000001",
+  );
+  assert.equal(
+    customerIdFromIdToken(fakeJwt({ ...good, aud: ["other", CLIENT_ID] }), expected),
+    "10000000000001",
+  );
+
+  assert.equal(customerIdFromIdToken(fakeJwt({ ...good, aud: "someone-else" }), expected), null);
+  assert.equal(customerIdFromIdToken(fakeJwt({ ...good, iss: "https://evil.example" }), expected), null);
+  assert.equal(customerIdFromIdToken(fakeJwt({ ...good, sub: "" }), expected), null);
+  assert.equal(customerIdFromIdToken(fakeJwt({ iss: ISSUER, aud: CLIENT_ID }), expected), null);
+  assert.equal(customerIdFromIdToken("not-a-jwt", expected), null);
+  assert.equal(customerIdFromIdToken("a.%%%.c", expected), null);
+  assert.equal(customerIdFromIdToken(undefined, expected), null);
+
+  assert.equal(decodeJwtPayload("a.b"), null);
+  assert.equal(customerIdFromClaims({ sub: " 42 " }), "42");
+  assert.equal(customerIdFromClaims({ sub: 42 }), null);
+  assert.equal(customerIdFromClaims(null), null);
+}
+
+function testSessionSealAndParse() {
+  const payload = {
+    accessToken: "at",
+    refreshToken: "rt",
+    expiresAt: 1_900_000_000_000,
+    customerId: "10000000000001",
+  };
+
+  // Round trip keeps the customer ID.
+  const sealed = seal(payload, SECRET);
+  assert.deepEqual(parseSessionPayload(unseal(sealed, SECRET)), {
+    ...payload,
+    storefrontToken: undefined,
+  });
+
+  // Tampered, truncated or wrong-secret cookies are rejected, not thrown.
+  const raw = Buffer.from(sealed, "base64url");
+  raw[raw.length - 1] ^= 1;
+  assert.equal(unseal(raw.toString("base64url"), SECRET), null);
+  assert.equal(unseal("short", SECRET), null);
+  assert.equal(unseal(sealed, "y".repeat(48)), null);
+
+  // Sessions from before the ID was stored still parse, with no customerId.
+  const legacy = parseSessionPayload({ accessToken: "at", refreshToken: "rt", expiresAt: 1 });
+  assert.ok(legacy);
+  assert.equal(legacy.customerId, undefined);
+  assert.equal(parseSessionPayload({ ...payload, customerId: "" })?.customerId, undefined);
+
+  // Missing tokens or a bad expiry make it no session at all.
+  assert.equal(parseSessionPayload({ refreshToken: "rt", expiresAt: 1 }), null);
+  assert.equal(parseSessionPayload({ accessToken: "at", refreshToken: "rt", expiresAt: "soon" }), null);
+  assert.equal(parseSessionPayload(null), null);
+}
+
 testRateLimiter();
 testSameOrigin();
 testShopifyWebhookSignature();
 testApplyPendingEdits();
 testCartNotices();
 testStockRules();
+testCustomerIdFromIdToken();
+testSessionSealAndParse();
 console.log("audit-unit: all assertions passed");

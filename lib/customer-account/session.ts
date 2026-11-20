@@ -1,12 +1,8 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from "node:crypto";
 import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
 import { getCustomerAccountConfig } from "./config";
+import { customerIdFromClaims, decodeJwtPayload } from "./id-token";
+import { parseSessionPayload, seal, unseal } from "./seal";
 
 export const CUSTOMER_SESSION_COOKIE = "zj-ca-session";
 export const CUSTOMER_ID_TOKEN_COOKIE = "zj-ca-id";
@@ -22,6 +18,8 @@ export type CustomerSession = {
   idToken?: string;
   /** Storefront API customer token; links carts to the customer for checkout. */
   storefrontToken?: string;
+  /** Shopify customer ID (the ID token's `sub`). Undefined only for old sessions that predate it. */
+  customerId?: string;
 };
 
 export type PkcePayload = {
@@ -29,42 +27,6 @@ export type PkcePayload = {
   verifier: string;
   returnTo?: string;
 };
-
-function keyFromSecret(secret: string) {
-  return createHash("sha256").update(secret).digest();
-}
-
-function seal(payload: unknown, secret: string) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", keyFromSecret(secret), iv);
-  const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
-  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]).toString("base64url");
-}
-
-function unseal<T>(token: string, secret: string): T | null {
-  try {
-    const raw = Buffer.from(token, "base64url");
-    if (raw.length < 28) return null;
-    const iv = raw.subarray(0, 12);
-    const tag = raw.subarray(12, 28);
-    const encrypted = raw.subarray(28);
-    const decipher = createDecipheriv(
-      "aes-256-gcm",
-      keyFromSecret(secret),
-      iv,
-    );
-    decipher.setAuthTag(tag);
-    const plaintext = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final(),
-    ]);
-    return JSON.parse(plaintext.toString("utf8")) as T;
-  } catch {
-    return null;
-  }
-}
 
 function cookieOptions(maxAge: number) {
   return {
@@ -168,6 +130,7 @@ export function applyCustomerSession(
         refreshToken: session.refreshToken,
         expiresAt: session.expiresAt,
         storefrontToken: session.storefrontToken,
+        customerId: session.customerId,
       },
       sessionSecret,
     ),
@@ -204,20 +167,8 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
     const value = await readChunkedCookie(CUSTOMER_SESSION_COOKIE);
     if (!value) return null;
 
-    const session = unseal<{
-      accessToken: string;
-      refreshToken: string;
-      expiresAt: number;
-      storefrontToken?: string;
-    }>(value, sessionSecret);
-
-    if (
-      !session?.accessToken ||
-      !session.refreshToken ||
-      !Number.isFinite(session.expiresAt)
-    ) {
-      return null;
-    }
+    const session = parseSessionPayload(unseal(value, sessionSecret));
+    if (!session) return null;
 
     let idToken: string | undefined;
     const idValue = await readChunkedCookie(CUSTOMER_ID_TOKEN_COOKIE);
@@ -226,23 +177,30 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
       idToken = sealed?.idToken;
     }
 
-    return {
-      accessToken: session.accessToken,
-      refreshToken: session.refreshToken,
-      expiresAt: session.expiresAt,
-      idToken,
-      storefrontToken:
-        typeof session.storefrontToken === "string"
-          ? session.storefrontToken
-          : undefined,
-    };
+    // Sessions created before the ID was stored: recover it from the sealed ID
+    // token. If that fails it stays undefined and hasCustomerSession() is false.
+    const customerId =
+      session.customerId ??
+      (idToken ? customerIdFromClaims(decodeJwtPayload(idToken)) : null) ??
+      undefined;
+
+    return { ...session, idToken, customerId };
   } catch {
     return null;
   }
 }
 
+/**
+ * Signed in = a valid session that knows who the customer is. An old session
+ * without a customer ID counts as signed out, so protected pages send the
+ * shopper through login again (silent if they're still signed in at Shopify).
+ */
 export async function hasCustomerSession() {
-  return Boolean(await getCustomerSession());
+  return Boolean((await getCustomerSession())?.customerId);
+}
+
+export async function getCustomerId(): Promise<string | null> {
+  return (await getCustomerSession())?.customerId ?? null;
 }
 
 export function isSessionExpiringSoon(session: CustomerSession) {

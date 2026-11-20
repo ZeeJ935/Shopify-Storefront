@@ -21,9 +21,7 @@ export function getCustomerAccountConfig(): CustomerAccountConfig {
     process.env.SHOPIFY_CUSTOMER_ACCOUNT_LOGOUT_REDIRECT_URL?.trim() ||
     process.env.SITE_URL?.trim() ||
     (callbackUrl ? new URL(callbackUrl).origin : undefined);
-  const sessionSecret =
-    process.env.SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET?.trim() ||
-    process.env.SESSION_SECRET?.trim();
+  const sessionSecret = process.env.SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET?.trim();
 
   if (
     !storeDomain ||

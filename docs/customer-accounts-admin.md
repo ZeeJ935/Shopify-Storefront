@@ -33,7 +33,7 @@ When a session is missing or expired, the shopper is sent through `/account/auth
 - `SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET`
 - `SHOPIFY_CUSTOMER_ACCOUNT_SHOP_ID`
 - `SHOPIFY_CUSTOMER_ACCOUNT_CALLBACK_URL` — must match Admin exactly
-- `SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET` — 32+ chars (`openssl rand -base64 48`)
+- `SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET` — 32+ chars (`openssl rand -base64 48`) — required; the old `SESSION_SECRET` fallback is no longer read
 - `SHOPIFY_CUSTOMER_ACCOUNT_LOGOUT_REDIRECT_URL` — optional; storefront origin
 - `SITE_URL` — used as logout fallback
 
