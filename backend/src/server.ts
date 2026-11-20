@@ -7,6 +7,7 @@ const db = createDb(env.databaseUrl);
 const app = buildApp({
   serviceToken: env.serviceToken,
   customers: db.customers,
+  favourites: db.favourites,
   pingDb: db.ping,
   logger: { level: process.env.LOG_LEVEL ?? "info" },
 });

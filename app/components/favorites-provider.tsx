@@ -36,6 +36,10 @@ type FavoritesContextValue = {
   toggle: (productId: string) => boolean;
   /** Navbar / guest entry: login then land on favourites. */
   goToFavourites: () => void;
+  /** True while a signed-in customer's saved list couldn't be loaded (it is not empty, just unknown). */
+  loadFailed: boolean;
+  /** Tries loading the saved list again; resolves true once it is in hand. */
+  retry: () => Promise<boolean>;
 };
 
 const FavoritesContext = createContext<FavoritesContextValue | null>(null);
@@ -64,6 +68,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [ids, setIds] = useState<string[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Latest list shown to the shopper, and the last list Shopify confirmed.
   const idsRef = useRef<string[]>([]);
@@ -81,6 +86,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     (next: string[]) => {
       confirmedRef.current = next;
       loadedRef.current = true;
+      setLoadFailed(false);
       showIds(next);
     },
     [showIds],
@@ -109,6 +115,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
         if (!remote.loaded) {
           // Keep local favourites and the login intent so a later load can merge them.
           loadedRef.current = false;
+          setLoadFailed(true);
           showIds([]);
           return;
         }
@@ -263,8 +270,10 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
         authenticated && idSet.has(productId),
       toggle,
       goToFavourites,
+      loadFailed: authenticated && loadFailed,
+      retry: reload,
     }),
-    [hydrated, authenticated, idSet, ids.length, toggle, goToFavourites],
+    [hydrated, authenticated, idSet, ids.length, toggle, goToFavourites, loadFailed, reload],
   );
 
   return (

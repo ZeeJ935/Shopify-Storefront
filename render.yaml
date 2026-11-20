@@ -1,0 +1,31 @@
+# Render Blueprint for the backend API and its Postgres (see backend/README.md → Deploy on Render).
+# The storefront itself stays on Vercel.
+services:
+  - type: web
+    name: zj-backend
+    runtime: node
+    rootDir: backend
+    # Starter is always on. "free" sleeps after 15 min idle (first request then waits about a minute).
+    plan: starter
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npm run db:migrate:prod
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: zj-backend-db
+          property: connectionString
+      # Render generates this; copy it into Vercel as BACKEND_SERVICE_TOKEN.
+      - key: BACKEND_SERVICE_TOKEN
+        generateValue: true
+
+databases:
+  - name: zj-backend-db
+    databaseName: zj_backend
+    # Free databases are deleted 30 days after creation (plus a 14-day grace period).
+    plan: basic-256mb

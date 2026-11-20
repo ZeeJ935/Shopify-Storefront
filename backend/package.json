@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx --env-file-if-exists=.env src/migrate.ts"
+    "db:migrate": "tsx --env-file-if-exists=.env src/migrate.ts",
+    "db:migrate:prod": "node --env-file-if-exists=.env dist/migrate.js"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",

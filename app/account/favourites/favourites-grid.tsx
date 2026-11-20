@@ -9,7 +9,8 @@ import type { ProductListItem } from "@/lib/products";
 import Skeleton from "@/app/components/skeleton";
 
 export default function FavouritesGrid() {
-  const { hydrated, ids, count } = useFavorites();
+  const { hydrated, ids, count, loadFailed, retry } = useFavorites();
+  const [retrying, setRetrying] = useState(false);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [pending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState(false);
@@ -40,6 +41,32 @@ export default function FavouritesGrid() {
         {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="aspect-[4/5] w-full rounded-lg" />
         ))}
+      </div>
+    );
+  }
+
+  // The saved list couldn't be read (for example the favourites service is
+  // down). Say so instead of "No favourites yet": nothing has been deleted.
+  if (loadFailed) {
+    return (
+      <div role="alert" className="rounded-xl border border-mist bg-snow px-6 py-16 text-center shadow-sm">
+        <h2 className="font-display text-xl font-semibold text-ink">
+          We couldn’t load your favourites
+        </h2>
+        <p className="mt-2 text-sm text-steel">
+          Your saved items are safe. Please try again in a moment.
+        </p>
+        <button
+          type="button"
+          className="btn btn-primary mt-8"
+          disabled={retrying}
+          onClick={() => {
+            setRetrying(true);
+            void retry().finally(() => setRetrying(false));
+          }}
+        >
+          {retrying ? "Trying again…" : "Try again"}
+        </button>
       </div>
     );
   }

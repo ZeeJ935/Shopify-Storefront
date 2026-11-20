@@ -1,27 +1,22 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { isValidCustomerId, isValidServiceToken } from "../src/auth.js";
-import type { CustomersRepo } from "../src/db/client.js";
+import { fakeCustomers, fakeFavourites } from "./fakes.js";
 
 const TOKEN = "t".repeat(48);
 const CUSTOMER = "10000000000001";
 
 function setup({ dbUp = true } = {}) {
-  const touched: string[] = [];
-  const customers: CustomersRepo = {
-    async touch(customerId) {
-      touched.push(customerId);
-      return { customerId, firstSeenAt: new Date("2026-01-01T00:00:00Z") };
-    },
-  };
+  const customers = fakeCustomers();
   const app = buildApp({
     serviceToken: TOKEN,
     customers,
+    favourites: fakeFavourites(),
     pingDb: async () => {
       if (!dbUp) throw new Error("down");
     },
   });
-  return { app, touched };
+  return { app, touched: customers.touched };
 }
 
 let app: ReturnType<typeof buildApp> | undefined;

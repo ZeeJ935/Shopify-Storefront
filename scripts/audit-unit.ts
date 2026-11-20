@@ -22,6 +22,12 @@ import {
   decodeJwtPayload,
 } from "../lib/customer-account/id-token";
 import { parseSessionPayload, seal, unseal } from "../lib/customer-account/seal";
+import {
+  loadFavourites,
+  mergeForLogin,
+  pickFavouritesStore,
+  type FavouritesBackend,
+} from "../lib/favourites-store";
 
 const STORE = "zj-store-eer28nlk.myshopify.com";
 const CUSTOM = "shop.example.com";
@@ -486,6 +492,120 @@ function testSessionSealAndParse() {
   assert.equal(parseSessionPayload(null), null);
 }
 
+// ---- Favourites: Postgres store, one-time metafield import, login merge ----
+
+function fakeFavouritesBackend(start: { ids: string[]; imported: boolean }, { down = false } = {}) {
+  const state = { ...start, ids: [...start.ids] };
+  const calls = { get: 0, importOnce: [] as string[][] };
+  const backend: FavouritesBackend = {
+    async get() {
+      calls.get++;
+      if (down) throw new Error("Backend request failed: 503 /v1/favourites");
+      return { ...state, ids: [...state.ids] };
+    },
+    async importOnce(ids) {
+      calls.importOnce.push(ids);
+      if (down) throw new Error("down");
+      if (state.imported) return { ...state, imported: false };
+      state.ids = [...new Set([...state.ids, ...ids])];
+      state.imported = true;
+      return { ...state, imported: true };
+    },
+  };
+  return { backend, calls, state };
+}
+
+async function testLoadFavourites() {
+  let metafieldReads = 0;
+  const metafield = (ids: string[]) => async () => {
+    metafieldReads++;
+    return ids;
+  };
+
+  // Already imported: Postgres only, the metafield is not read.
+  {
+    const f = fakeFavouritesBackend({ ids: ["p1", "p2"], imported: true });
+    metafieldReads = 0;
+    assert.deepEqual(await loadFavourites({ backend: f.backend, readMetafield: metafield(["old"]) }), {
+      ids: ["p1", "p2"],
+      loaded: true,
+    });
+    assert.equal(metafieldReads, 0);
+    assert.equal(f.calls.importOnce.length, 0);
+  }
+
+  // First load: read the metafield once and import it (de-duplicated, capped at 200).
+  {
+    const f = fakeFavouritesBackend({ ids: [], imported: false });
+    const big = Array.from({ length: 250 }, (_, i) => `p${i}`);
+    const result = await loadFavourites({ backend: f.backend, readMetafield: metafield(["p0", ...big]) });
+    assert.equal(result.loaded, true);
+    assert.equal(result.ids.length, 200);
+    assert.equal(f.calls.importOnce.length, 1);
+    assert.equal(f.calls.importOnce[0].length, 200);
+    // Next load comes straight from Postgres.
+    metafieldReads = 0;
+    await loadFavourites({ backend: f.backend, readMetafield: metafield(["x"]) });
+    assert.equal(metafieldReads, 0);
+  }
+
+  // Empty metafield: imports [] and is marked imported, so it is never re-imported.
+  {
+    const f = fakeFavouritesBackend({ ids: [], imported: false });
+    assert.deepEqual(await loadFavourites({ backend: f.backend, readMetafield: metafield([]) }), {
+      ids: [],
+      loaded: true,
+    });
+    assert.equal(f.state.imported, true);
+  }
+
+  // Backend down: not loaded, nothing imported, nothing read from Shopify.
+  {
+    const f = fakeFavouritesBackend({ ids: ["p1"], imported: true }, { down: true });
+    metafieldReads = 0;
+    assert.deepEqual(await loadFavourites({ backend: f.backend, readMetafield: metafield(["old"]) }), {
+      ids: [],
+      loaded: false,
+    });
+    assert.equal(f.calls.importOnce.length, 0);
+    assert.equal(metafieldReads, 0);
+  }
+
+  // Shopify read fails during the first load: not loaded, and no (empty) import is written.
+  {
+    const f = fakeFavouritesBackend({ ids: [], imported: false });
+    const result = await loadFavourites({
+      backend: f.backend,
+      readMetafield: async () => {
+        throw new Error("Customer Account API unavailable");
+      },
+    });
+    assert.deepEqual(result, { ids: [], loaded: false });
+    assert.equal(f.calls.importOnce.length, 0);
+    assert.equal(f.state.imported, false);
+  }
+}
+
+function testMergeForLogin() {
+  // Saved favourites keep their order; guest ones are appended; duplicates removed.
+  assert.deepEqual(mergeForLogin(["a", "b"], ["b", "c", "a", "d"]), ["a", "b", "c", "d"]);
+  assert.deepEqual(mergeForLogin([], ["x", "x", ""]), ["x"]);
+  assert.deepEqual(mergeForLogin(["a"], "not-an-array"), ["a"]);
+  // Capped at 200, saved ones win.
+  const saved = Array.from({ length: 199 }, (_, i) => `s${i}`);
+  const merged = mergeForLogin(saved, ["g1", "g2"]);
+  assert.equal(merged.length, 200);
+  assert.equal(merged[199], "g1");
+}
+
+function testPickFavouritesStore() {
+  assert.equal(pickFavouritesStore({}), "metafield");
+  assert.equal(pickFavouritesStore({ BACKEND_URL: "http://x" }), "metafield");
+  assert.equal(pickFavouritesStore({ BACKEND_SERVICE_TOKEN: "t" }), "metafield");
+  assert.equal(pickFavouritesStore({ BACKEND_URL: " ", BACKEND_SERVICE_TOKEN: "t" }), "metafield");
+  assert.equal(pickFavouritesStore({ BACKEND_URL: "http://x", BACKEND_SERVICE_TOKEN: "t" }), "postgres");
+}
+
 testRateLimiter();
 testSameOrigin();
 testShopifyWebhookSignature();
@@ -494,4 +614,11 @@ testCartNotices();
 testStockRules();
 testCustomerIdFromIdToken();
 testSessionSealAndParse();
-console.log("audit-unit: all assertions passed");
+testMergeForLogin();
+testPickFavouritesStore();
+testLoadFavourites()
+  .then(() => console.log("audit-unit: all assertions passed"))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

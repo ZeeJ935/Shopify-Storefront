@@ -739,6 +739,8 @@ export async function updateCustomerProfile(input: {
   return userErrorsToResult(data.customerUpdate.userErrors);
 }
 
+// TODO(remove after favourites import is verified): favourites now live in Postgres;
+// this is only the one-time import source and the fallback when BACKEND_URL is unset.
 export async function getCustomerFavouriteIds(): Promise<string[]> {
   const data = await customerAccountFetch<{
     customer: {
@@ -761,6 +763,8 @@ export async function getCustomerFavouriteIds(): Promise<string[]> {
   return parseFavouriteIds(data.customer.metafield?.value ?? null);
 }
 
+// TODO(remove after favourites import is verified): only used by the metafield
+// fallback (BACKEND_URL unset). With the backend on, the metafield is never written.
 export async function setCustomerFavouriteIds(
   ids: string[],
 ): Promise<MutationResult> {

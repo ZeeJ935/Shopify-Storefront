@@ -1,5 +1,6 @@
 import "server-only";
 import { getCustomerId } from "@/lib/customer-account/session";
+import { pickFavouritesStore } from "@/lib/favourites-store";
 
 // Server-side client for the /backend service. The browser never calls the
 // backend: only this server holds BACKEND_SERVICE_TOKEN, and it tells the
@@ -15,6 +16,12 @@ export class BackendError extends Error {
     super(`Backend request failed: ${status} ${path}`);
     this.name = "BackendError";
   }
+}
+
+/** True when both backend variables are set. Until then, favourites stay on the Shopify metafield. */
+export function isBackendConfigured() {
+  const { BACKEND_URL, BACKEND_SERVICE_TOKEN } = process.env;
+  return pickFavouritesStore({ BACKEND_URL, BACKEND_SERVICE_TOKEN }) === "postgres";
 }
 
 function backendConfig() {
@@ -56,4 +63,18 @@ export async function getBackendMe(): Promise<BackendMe | null> {
   const customerId = await getCustomerId();
   if (!customerId) return null;
   return backendFetch<BackendMe>("/v1/me", { customerId });
+}
+
+export type BackendFavourites = { ids: string[]; imported: boolean };
+
+export function getBackendFavourites(customerId: string) {
+  return backendFetch<BackendFavourites>("/v1/favourites", { customerId });
+}
+
+export async function putBackendFavourites(customerId: string, ids: string[]) {
+  return (await backendFetch<{ ids: string[] }>("/v1/favourites", { customerId, method: "PUT", body: { ids } })).ids;
+}
+
+export function importBackendFavourites(customerId: string, ids: string[]) {
+  return backendFetch<BackendFavourites>("/v1/favourites/import", { customerId, method: "POST", body: { ids } });
 }

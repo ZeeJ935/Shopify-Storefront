@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
+import { createFavouritesRepo } from "./favourites.js";
 import { customers } from "./schema.js";
 
 export type CustomerRecord = { customerId: string; firstSeenAt: Date };
@@ -30,6 +31,7 @@ export function createDb(databaseUrl: string) {
     pool,
     db,
     customers: customersRepo,
+    favourites: createFavouritesRepo(db),
     async ping() {
       await pool.query("select 1");
     },

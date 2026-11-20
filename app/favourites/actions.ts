@@ -2,15 +2,24 @@
 
 import { unstable_rethrow } from "next/navigation";
 import {
+  getBackendFavourites,
+  importBackendFavourites,
+  isBackendConfigured,
+  putBackendFavourites,
+} from "@/lib/backend";
+import {
   getCustomerFavouriteIds,
   setCustomerFavouriteIds,
 } from "@/lib/customer-account/api";
-import { hasCustomerSession } from "@/lib/customer-account/session";
-import { mergeFavouriteIds, parseFavouriteIds } from "@/lib/favourites";
+import { getCustomerId, hasCustomerSession } from "@/lib/customer-account/session";
+import { parseFavouriteIds } from "@/lib/favourites";
+import {
+  loadFavourites,
+  MAX_FAVOURITES,
+  mergeForLogin,
+  type LoadedFavourites,
+} from "@/lib/favourites-store";
 import { getProductsByIds, type ProductListItem } from "@/lib/products";
-
-/** Most favourites a customer can hold; keeps the metafield and lookups bounded. */
-const MAX_FAVOURITES = 200;
 
 export type FavouritesStateResult = {
   authenticated: boolean;
@@ -22,20 +31,63 @@ export type FavouritesStateResult = {
   loaded: boolean;
 };
 
+// Where favourites live: Postgres (via the backend) once BACKEND_URL and
+// BACKEND_SERVICE_TOKEN are set, otherwise the Shopify metafield as before.
+// If the backend is configured but down, favourites show as not loaded; we do
+// NOT fall back to the metafield then, which would split data across two stores.
+let loggedStore = false;
+function postgresEnabled() {
+  const postgres = isBackendConfigured();
+  if (!loggedStore) {
+    loggedStore = true;
+    console.info(`[favourites] store: ${postgres ? "postgres" : "metafield"}`);
+  }
+  return postgres;
+}
+
+/** The signed-in customer's saved list. Never writes unless it is the one-time metafield import. */
+async function readSaved(): Promise<LoadedFavourites> {
+  if (!postgresEnabled()) {
+    // TODO(remove after favourites import is verified): metafield fallback.
+    // Errors propagate as before (an expired session redirects to refresh).
+    return { ids: await getCustomerFavouriteIds(), loaded: true };
+  }
+
+  const customerId = await getCustomerId();
+  if (!customerId) return { ids: [], loaded: false };
+  return loadFavourites({
+    backend: {
+      get: () => getBackendFavourites(customerId),
+      importOnce: (ids) => importBackendFavourites(customerId, ids),
+    },
+    // TODO(remove after favourites import is verified): one-time import source.
+    readMetafield: getCustomerFavouriteIds,
+  });
+}
+
+/** Replaces the saved list. Returns an error message for the toast, or null. */
+async function writeSaved(ids: string[]): Promise<string | null> {
+  if (!postgresEnabled()) {
+    // TODO(remove after favourites import is verified): metafield fallback.
+    const result = await setCustomerFavouriteIds(ids);
+    return result.ok ? null : friendlyFavouritesError(result.message);
+  }
+  const customerId = await getCustomerId();
+  if (!customerId) return "Sign in to sync favourites.";
+  await putBackendFavourites(customerId, ids);
+  return null;
+}
+
 export async function getFavouritesState(): Promise<FavouritesStateResult> {
   const authenticated = await hasCustomerSession();
   if (!authenticated) {
     return { authenticated: false, ids: [], loaded: true };
   }
 
-  try {
-    const ids = await getCustomerFavouriteIds();
-    return { authenticated: true, ids, loaded: true };
-  } catch {
-    // Deliberately no rethrow: this runs in the background on every page, so
-    // an expiring session must not redirect the shopper away mid-browse.
-    return { authenticated: true, ids: [], loaded: false };
-  }
+  // Deliberately no rethrow: this runs in the background on every page, so
+  // an expiring session must not redirect the shopper away mid-browse.
+  const saved = await readSaved().catch(() => ({ ids: [], loaded: false }));
+  return { authenticated: true, ...saved };
 }
 
 export async function syncFavouritesOnLogin(
@@ -51,15 +103,14 @@ export async function syncFavouritesOnLogin(
   }
 
   try {
-    const remote = await getCustomerFavouriteIds();
-    const merged = mergeFavouriteIds(remote, parseFavouriteIds(localIds)).slice(
-      0,
-      MAX_FAVOURITES,
-    );
-    const result = await setCustomerFavouriteIds(merged);
-    if (!result.ok) {
-      throw new Error(friendlyFavouritesError(result.message));
+    const saved = await readSaved();
+    if (!saved.loaded) {
+      // Never merge into (and then save over) a list we couldn't read.
+      throw new Error(friendlyFavouritesError("unavailable"));
     }
+    const merged = mergeForLogin(saved.ids, localIds);
+    const message = await writeSaved(merged);
+    if (message) throw new Error(message);
     return { authenticated: true, ids: merged, loaded: true };
   } catch (error) {
     unstable_rethrow(error);
@@ -86,10 +137,8 @@ export async function saveFavourites(
   }
 
   try {
-    const result = await setCustomerFavouriteIds(cleaned);
-    return result.ok
-      ? { ok: true }
-      : { ok: false, message: friendlyFavouritesError(result.message) };
+    const message = await writeSaved(cleaned);
+    return message ? { ok: false, message } : { ok: true };
   } catch (error) {
     unstable_rethrow(error);
     return {
@@ -101,10 +150,18 @@ export async function saveFavourites(
   }
 }
 
+const UNAVAILABLE = "Favourites are unavailable right now. Please try again.";
+const FRIENDLY = new Set([UNAVAILABLE, "Sign in to sync favourites."]);
+
 function friendlyFavouritesError(message?: string) {
   const raw = message || "Could not save favourites.";
+  if (FRIENDLY.has(raw)) return raw;
   if (/namespace and key on Metafields|not allowed/i.test(raw)) {
     return "Favourites aren’t set up in Shopify yet. In Admin, create a customer metafield custom.favourites (JSON) with Customer account access: Read and write.";
+  }
+  if (raw === "unavailable" || /Backend request failed|BACKEND_|fetch failed|aborted|timeout/i.test(raw)) {
+    console.error("[favourites] backend:", raw);
+    return UNAVAILABLE;
   }
   // Anything else is API detail: keep it in the server log, not the toast.
   console.error("[favourites]", raw);
