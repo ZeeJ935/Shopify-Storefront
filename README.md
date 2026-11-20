@@ -46,7 +46,6 @@ Copy from `.env.example`. Never prefix Storefront, Customer Account or backend s
 | `SHOPIFY_CUSTOMER_ACCOUNT_CALLBACK_URL` | Must match Admin exactly (e.g. `…/account/callback`) |
 | `SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET` | ≥32 chars (`openssl rand -base64 48`) |
 | `SHOPIFY_CUSTOMER_ACCOUNT_LOGOUT_REDIRECT_URL` | Optional; defaults to `SITE_URL` |
-| `SHOPIFY_WEBHOOK_SECRET` | Webhook signing secret (see [Instant catalog updates](#instant-catalog-updates-webhooks)) |
 | `SUPPORT_EMAIL` | Optional; shows a “Need help?” email button on order pages |
 | `BACKEND_URL` | Backend service origin (server-side only; see [backend/README.md](backend/README.md)) |
 | `BACKEND_SERVICE_TOKEN` | Shared secret for calling the backend; must match the backend's value |
@@ -77,7 +76,6 @@ Without this, the import can't read old favourites, and the fallback (no `BACKEN
 | `/account` · `/orders` · `/addresses` · `/profile` | Protected account |
 | `/account/favourites` | Favourites page (navbar heart; not in account tabs) |
 | `/api/predictive-search` · `/api/catalog` | Search drawer and infinite-scroll JSON (rate limited) |
-| `/api/webhooks/shopify` | Old Shopify webhook receiver (signed); replaced by the backend, removed after the switch |
 | `/api/revalidate` | Clears the catalog cache; called by the backend with `BACKEND_SERVICE_TOKEN` |
 
 `app/error.tsx` and `app/global-error.tsx` show a branded “Something went wrong” page with **Try again**.
@@ -129,7 +127,7 @@ Webhooks now go to the **backend** (`POST /webhooks/shopify`): it checks the sig
 
 Topics that refresh the catalog: product, collection and inventory level create/update/delete.
 
-The old route, `/api/webhooks/shopify` (needs `SHOPIFY_WEBHOOK_SECRET` here), still works until every webhook in Shopify points at the backend; it is marked for removal after that.
+The webhook signing secret (`SHOPIFY_WEBHOOK_SECRET`) now lives only on the backend.
 
 ## Security notes
 

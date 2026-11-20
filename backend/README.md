@@ -39,7 +39,7 @@ Names only. Copy `.env.example` to `.env`.
 | `HOST` | Listen address (default `127.0.0.1`) |
 | `PORT` | Listen port (default `4000`) |
 | `LOG_LEVEL` | Optional; default `info` |
-| `SHOPIFY_WEBHOOK_SECRET` | Shopify's webhook signing secret (same value as the storefront's). Without it, webhooks get `500` so Shopify retries later |
+| `SHOPIFY_WEBHOOK_SECRET` | Shopify's webhook signing secret (Shopify admin → Settings → Notifications → Webhooks). Without it, webhooks get `500` so Shopify retries later |
 | `STOREFRONT_URL` | Storefront origin, for clearing its cache (`POST /api/revalidate`). Without it, catalog webhooks fail and retry |
 
 ## Run locally
@@ -98,11 +98,10 @@ curl -i -X POST http://127.0.0.1:4000/webhooks/shopify \
 
 ### Point Shopify at the backend
 
-1. On Render, set `SHOPIFY_WEBHOOK_SECRET` (the same value as in Vercel) and `STOREFRONT_URL`, and redeploy. `curl -i -X POST https://<your-api>.onrender.com/webhooks/shopify` should return `401` (not `404`).
+1. On Render, set `SHOPIFY_WEBHOOK_SECRET` and `STOREFRONT_URL`, and redeploy. `curl -i -X POST https://<your-api>.onrender.com/webhooks/shopify` should return `401` (not `404`).
 2. Shopify admin → **Settings → Notifications → Webhooks**. For each event (product, collection and inventory level create/update/delete), edit the URL to `https://<your-api>.onrender.com/webhooks/shopify`, format JSON. The signing secret stays the same.
 3. Click **Send test** on one webhook, or edit a product. A row appears in `webhook_events` with `processed_at` set, and the product page shows the change within seconds.
 
-Until every webhook points here, the storefront's old route (`/api/webhooks/shopify`) keeps working.
 
 **Free plan:** the API sleeps after 15 minutes idle and takes about a minute to wake. Shopify waits only a few seconds, so a webhook that arrives while it sleeps times out and Shopify retries it later (the 2-minute cache refresh still applies meanwhile). If deliveries keep failing for a long time, Shopify can remove the webhook; an always-on plan avoids this.
 

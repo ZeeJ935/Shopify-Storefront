@@ -27,6 +27,7 @@
 | SEO | `/account` and `/search` disallowed in robots; `noindex` metadata | `app/robots.ts`, layouts |
 | Content | Items flagged `demo` (placeholder links, unconfirmed promos) are hidden | `lib/site-content.ts` |
 | Tests | `scripts/audit-unit.ts` also covers sale price, return paths, rate limiter, origin check, webhook signatures | `scripts/audit-unit.ts` |
+| Webhooks (2026-11-20) | Moved to the backend: `POST /webhooks/shopify` records, dedupes and retries (pg-boss), then calls the storefront's token-protected `/api/revalidate`. The old `/api/webhooks/shopify` and `lib/shopify-webhook.ts` are removed; later rows below that mention them describe the earlier setup | `backend/src/routes/webhooks.ts`, `app/api/revalidate/route.ts` |
 
 Still open: policy pages, post-checkout thank-you, analytics/consent, Markets/i18n, variant option pickers, CI.
 

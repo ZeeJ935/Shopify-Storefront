@@ -86,6 +86,6 @@ export async function shopifyFetch<T>(
 
 /**
  * Default revalidate window for catalog / homepage queries. A backup only:
- * Shopify webhooks (app/api/webhooks/shopify) refresh the catalog on change.
+ * Shopify webhooks (received by the backend, which calls app/api/revalidate) refresh the catalog on change.
  */
 export const CATALOG_REVALIDATE = 120;
