@@ -1,9 +1,10 @@
 /**
  * Fixed-window rate limiting, kept in memory.
  *
- * Best effort: on Vercel each server instance keeps its own counts, so this
- * stops runaway scripts and casual abuse, not a distributed attack. A hard
- * global limit needs shared storage (e.g. Upstash Redis) or Vercel Firewall rules.
+ * Now only the fallback for local dev: with UPSTASH_REDIS_REST_URL and
+ * UPSTASH_REDIS_REST_TOKEN set, lib/shared-rate-limit.ts uses Upstash Redis so
+ * limits are shared by every server instance. In memory, each instance keeps
+ * its own counts.
  */
 
 export type RateLimitResult = {

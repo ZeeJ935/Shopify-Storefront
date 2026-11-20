@@ -49,6 +49,8 @@ Copy from `.env.example`. Never prefix Storefront, Customer Account or backend s
 | `SUPPORT_EMAIL` | Optional; shows a “Need help?” email button on order pages |
 | `BACKEND_URL` | Backend service origin (server-side only; see [backend/README.md](backend/README.md)) |
 | `BACKEND_SERVICE_TOKEN` | Shared secret for calling the backend; must match the backend's value |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL for shared rate limiting. Optional; without it (local dev) limits are kept in memory per instance |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token (pair with the URL above) |
 
 Full Admin steps (Headless channel, New customer accounts, favourites metafield): **[docs/customer-accounts-admin.md](docs/customer-accounts-admin.md)**.
 
@@ -106,7 +108,7 @@ npm run build    # production build
 npm run start    # serve build
 npm run lint     # eslint
 npm test         # unit asserts (scripts/audit-unit.ts): checkout URL, money, sale price,
-                 # return paths, rate limiter, webhook signatures, cart edits/notices, stock rules
+                 # return paths, rate limiters (in-memory + shared), client IP, cart edits/notices, stock rules
 
 npx tsx scripts/test-cart.ts <product-handle>   # live cart smoke test (hits Shopify)
 ```
@@ -133,7 +135,9 @@ The webhook signing secret (`SHOPIFY_WEBHOOK_SECRET`) now lives only on the back
 
 - Storefront token and Customer Account secrets are server-only; sessions are AES-GCM sealed in httpOnly cookies.
 - Checkout URLs are host-checked on the server before reaching the browser; login `returnTo` paths must stay on-site.
-- `proxy.ts` rate-limits search, catalog and Server Actions per IP (in-memory, per server instance — best effort; use Upstash or Vercel Firewall for a hard global limit) and rejects cross-site logout.
+- `proxy.ts` rate-limits per IP: search and catalog 60/min, Server Actions 120/min (`lib/proxy-rate-limit.ts`). With `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` set, the limits are shared by every server instance (Upstash Redis, sliding window, `lib/shared-rate-limit.ts`); without them, counts are kept in memory per instance (local dev). Over the limit → `429` with `Retry-After`. If Redis is unreachable, requests are allowed (fail open) and the error is logged.
+- The IP comes only from Vercel's own headers (`x-vercel-forwarded-for` / `x-forwarded-for`, which Vercel overwrites so clients can't fake them; `lib/client-ip.ts`). Outside Vercel no header is trusted. This relies on Vercel being the outermost proxy: put another CDN in front and every visitor would share that CDN's IP.
+- `proxy.ts` also rejects cross-site logout.
 - Webhooks are verified with HMAC-SHA256 over the raw body.
 - `next.config.ts` sends `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options: DENY` and `Permissions-Policy` on every response. No Content-Security-Policy yet; HSTS comes from Vercel.
 

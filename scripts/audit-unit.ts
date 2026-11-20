@@ -21,6 +21,10 @@ import {
 } from "../lib/customer-account/id-token";
 import { parseSessionPayload, seal, unseal } from "../lib/customer-account/seal";
 import { isServiceTokenValid } from "../lib/service-token";
+import { NextRequest } from "next/server";
+import { clientIp } from "../lib/client-ip";
+import { rateLimitResponse } from "../lib/proxy-rate-limit";
+import { createSharedRateLimiter, type MakeLimiter } from "../lib/shared-rate-limit";
 import {
   describeFavouritesError,
   loadFavourites,
@@ -645,6 +649,109 @@ function testServiceToken() {
   assert.equal(isServiceTokenValid("Bearer ", ""), false);
 }
 
+// ---- Shared rate limiting (Upstash) ----
+
+function testClientIp() {
+  const h = (init: Record<string, string>) => new Headers(init);
+  const vercel = { VERCEL: "1" };
+  assert.equal(clientIp(h({ "x-vercel-forwarded-for": "203.0.113.7", "x-forwarded-for": "198.51.100.1" }), vercel), "203.0.113.7");
+  assert.equal(clientIp(h({ "x-forwarded-for": "198.51.100.1, 10.0.0.1" }), vercel), "198.51.100.1");
+  assert.equal(clientIp(h({}), vercel), "unknown");
+  // Off Vercel nothing is trusted: a client-sent header can't pick its own bucket.
+  assert.equal(clientIp(h({ "x-forwarded-for": "1.2.3.4", "x-real-ip": "5.6.7.8" }), {}), "local");
+}
+
+/** A fake Upstash limiter: counts per key, blocks past `limit`, resets 30 s from "now". */
+function fakeUpstash(now: () => number, { fail = false, timeout = false } = {}) {
+  const made: string[] = [];
+  const counts = new Map<string, number>();
+  const make: MakeLimiter = (bucket, limit) => {
+    made.push(`${bucket}:${limit}`);
+    return {
+      async limit(id) {
+        if (fail) throw new Error("fetch failed: ECONNREFUSED");
+        if (timeout) return { success: true, reset: 0, reason: "timeout" };
+        const n = (counts.get(`${bucket}:${id}`) ?? 0) + 1;
+        counts.set(`${bucket}:${id}`, n);
+        return { success: n <= limit, reset: now() + 30_000 };
+      },
+    };
+  };
+  return { make, made };
+}
+
+const UPSTASH_ENV = { UPSTASH_REDIS_REST_URL: "https://example.upstash.io", UPSTASH_REDIS_REST_TOKEN: "token" };
+
+async function testSharedRateLimit() {
+  const now = () => 1_000_000;
+
+  // Redis mode: over the limit → blocked with Retry-After from the window reset.
+  {
+    const fake = fakeUpstash(now);
+    const limiter = createSharedRateLimiter({ env: UPSTASH_ENV, windowMs: 60_000, makeLimiter: fake.make, now });
+    assert.equal(limiter.mode, "redis");
+    assert.deepEqual(await limiter.check("search", "1.1.1.1", 2), { allowed: true, retryAfterSeconds: 0 });
+    assert.deepEqual(await limiter.check("search", "1.1.1.1", 2), { allowed: true, retryAfterSeconds: 0 });
+    assert.deepEqual(await limiter.check("search", "1.1.1.1", 2), { allowed: false, retryAfterSeconds: 30 });
+    // Other clients and other buckets are separate; one limiter per bucket is reused.
+    assert.equal((await limiter.check("search", "2.2.2.2", 2)).allowed, true);
+    assert.equal((await limiter.check("action", "1.1.1.1", 2)).allowed, true);
+    assert.deepEqual(fake.made, ["search:2", "action:2"]);
+  }
+
+  // Redis error: fail open, and log once (not on every request).
+  {
+    const logs: string[] = [];
+    const fake = fakeUpstash(now, { fail: true });
+    const limiter = createSharedRateLimiter({ env: UPSTASH_ENV, windowMs: 60_000, makeLimiter: fake.make, now, log: (m) => logs.push(m) });
+    for (let i = 0; i < 5; i++) assert.equal((await limiter.check("search", "1.1.1.1", 1)).allowed, true);
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /Redis unavailable, allowing requests: fetch failed/);
+  }
+
+  // Redis too slow (Upstash's own timeout): also fail open and logged.
+  {
+    const logs: string[] = [];
+    const fake = fakeUpstash(now, { timeout: true });
+    const limiter = createSharedRateLimiter({ env: UPSTASH_ENV, windowMs: 60_000, makeLimiter: fake.make, now, log: (m) => logs.push(m) });
+    assert.equal((await limiter.check("search", "1.1.1.1", 1)).allowed, true);
+    assert.match(logs[0], /timed out/);
+  }
+
+  // No Upstash env (local dev): the in-memory limiter is used and still limits.
+  {
+    const fake = fakeUpstash(now);
+    for (const env of [{}, { UPSTASH_REDIS_REST_URL: "https://x" }, { UPSTASH_REDIS_REST_TOKEN: "t" }]) {
+      const limiter = createSharedRateLimiter({ env, windowMs: 60_000, makeLimiter: fake.make, now });
+      assert.equal(limiter.mode, "memory");
+      assert.equal((await limiter.check("search", "local", 2)).allowed, true);
+      assert.equal((await limiter.check("search", "local", 2)).allowed, true);
+      assert.deepEqual(await limiter.check("search", "local", 2), { allowed: false, retryAfterSeconds: 60 });
+    }
+    assert.deepEqual(fake.made, []); // Redis never touched
+  }
+
+  // Proxy level: the 61st search request in a minute gets 429 + Retry-After.
+  {
+    const fake = fakeUpstash(now);
+    const limiter = createSharedRateLimiter({ env: UPSTASH_ENV, windowMs: 60_000, makeLimiter: fake.make, now });
+    const search = () =>
+      new NextRequest("https://shop.example/api/predictive-search?q=shoe", { headers: { "x-vercel-forwarded-for": "203.0.113.9" } });
+    for (let i = 0; i < 60; i++) assert.equal(await rateLimitResponse(search(), limiter.check, { VERCEL: "1" }), null);
+    const blocked = await rateLimitResponse(search(), limiter.check, { VERCEL: "1" });
+    assert.ok(blocked);
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.headers.get("Retry-After"), "30");
+    assert.deepEqual(await blocked.json(), { error: "Too many requests" });
+
+    // Unlimited routes are never checked; server actions use the 120/min bucket.
+    assert.equal(await rateLimitResponse(new NextRequest("https://shop.example/products/x"), limiter.check, {}), null);
+    const action = new NextRequest("https://shop.example/cart", { method: "POST", headers: { "next-action": "abc" } });
+    assert.equal(await rateLimitResponse(action, limiter.check, {}), null);
+    assert.ok(fake.made.includes("action:120"));
+  }
+}
+
 testRateLimiter();
 testSameOrigin();
 testApplyPendingEdits();
@@ -655,8 +762,10 @@ testSessionSealAndParse();
 testMergeForLogin();
 testPickFavouritesStore();
 testServiceToken();
+testClientIp();
 testLoadFavourites()
   .then(testFavouritesErrorReporting)
+  .then(testSharedRateLimit)
   .then(() => console.log("audit-unit: all assertions passed"))
   .catch((error) => {
     console.error(error);
