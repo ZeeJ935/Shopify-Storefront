@@ -25,21 +25,43 @@ export type FavouritesBackend = {
  * result is `loaded: false` and nothing has been written, so a failed read can
  * never overwrite saved favourites.
  */
+export type LoadStage = "backend-read" | "metafield-read" | "import";
+
 export async function loadFavourites(deps: {
   backend: FavouritesBackend;
   readMetafield: () => Promise<string[]>;
+  /** Told which step failed and why, so the server log explains a "not loaded". */
+  onError?: (stage: LoadStage, error: unknown) => void;
 }): Promise<LoadedFavourites> {
+  let stage: LoadStage = "backend-read";
   try {
     const current = await deps.backend.get();
     if (current.imported) return { ids: current.ids, loaded: true };
 
     // Throws if Shopify can't be read: we stop here rather than import a wrong (empty) list.
+    stage = "metafield-read";
     const fromMetafield = parseFavouriteIds(await deps.readMetafield()).slice(0, MAX_FAVOURITES);
+    stage = "import";
     const imported = await deps.backend.importOnce(fromMetafield);
     return { ids: imported.ids, loaded: true };
-  } catch {
+  } catch (error) {
+    deps.onError?.(stage, error);
     return { ids: [], loaded: false };
   }
+}
+
+/** A short, log-safe reason: status and path for backend errors, otherwise the error's name and message. */
+export function describeFavouritesError(error: unknown): string {
+  if (error && typeof error === "object") {
+    const e = error as { name?: unknown; message?: unknown; status?: unknown; path?: unknown };
+    if (e.name === "BackendError" && typeof e.status === "number") {
+      return `backend returned ${e.status} for ${String(e.path)}`;
+    }
+    const name = typeof e.name === "string" ? e.name : "Error";
+    const message = typeof e.message === "string" ? e.message : "";
+    return `${name}: ${message}`.slice(0, 200);
+  }
+  return String(error).slice(0, 200);
 }
 
 /** Login merge: saved favourites first (in their order), then guest ones not already saved; capped. */

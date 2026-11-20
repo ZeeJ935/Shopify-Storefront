@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { safeError } from "../errors.js";
 
 /** Open endpoint for load balancers and uptime checks. Reports the database without exposing details. */
 export function healthRoutes(app: FastifyInstance, pingDb: () => Promise<void>) {
@@ -7,7 +8,7 @@ export function healthRoutes(app: FastifyInstance, pingDb: () => Promise<void>) 
       await pingDb();
       return { ok: true, db: "up" };
     } catch (error) {
-      app.log.error({ err: error }, "database ping failed");
+      app.log.error({ err: safeError(error) }, "database ping failed");
       return reply.code(503).send({ ok: false, db: "down" });
     }
   });

@@ -23,6 +23,7 @@ import {
 } from "../lib/customer-account/id-token";
 import { parseSessionPayload, seal, unseal } from "../lib/customer-account/seal";
 import {
+  describeFavouritesError,
   loadFavourites,
   mergeForLogin,
   pickFavouritesStore,
@@ -606,6 +607,50 @@ function testPickFavouritesStore() {
   assert.equal(pickFavouritesStore({ BACKEND_URL: "http://x", BACKEND_SERVICE_TOKEN: "t" }), "postgres");
 }
 
+async function testFavouritesErrorReporting() {
+  const seen: string[] = [];
+  const onError = (stage: string, error: unknown) => seen.push(`${stage}: ${describeFavouritesError(error)}`);
+  const backendError = Object.assign(new Error("Backend request failed: 500 /v1/favourites"), {
+    name: "BackendError",
+    status: 500,
+    path: "/v1/favourites",
+  });
+
+  // Backend read fails → reported as backend-read with status and path.
+  await loadFavourites({
+    backend: { get: async () => { throw backendError; }, importOnce: async () => ({ ids: [], imported: true }) },
+    readMetafield: async () => [],
+    onError,
+  });
+  // Metafield read fails during the first load.
+  await loadFavourites({
+    backend: { get: async () => ({ ids: [], imported: false }), importOnce: async () => ({ ids: [], imported: true }) },
+    readMetafield: async () => { throw new TypeError("fetch failed"); },
+    onError,
+  });
+  // Import fails.
+  await loadFavourites({
+    backend: { get: async () => ({ ids: [], imported: false }), importOnce: async () => { throw backendError; } },
+    readMetafield: async () => ["p1"],
+    onError,
+  });
+  assert.deepEqual(seen, [
+    "backend-read: backend returned 500 for /v1/favourites",
+    "metafield-read: TypeError: fetch failed",
+    "import: backend returned 500 for /v1/favourites",
+  ]);
+
+  // Success reports nothing.
+  seen.length = 0;
+  await loadFavourites({
+    backend: { get: async () => ({ ids: ["p1"], imported: true }), importOnce: async () => ({ ids: [], imported: true }) },
+    readMetafield: async () => [],
+    onError,
+  });
+  assert.equal(seen.length, 0);
+  assert.equal(describeFavouritesError("x".repeat(500)).length, 200);
+}
+
 testRateLimiter();
 testSameOrigin();
 testShopifyWebhookSignature();
@@ -617,6 +662,7 @@ testSessionSealAndParse();
 testMergeForLogin();
 testPickFavouritesStore();
 testLoadFavourites()
+  .then(testFavouritesErrorReporting)
   .then(() => console.log("audit-unit: all assertions passed"))
   .catch((error) => {
     console.error(error);

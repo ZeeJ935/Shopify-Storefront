@@ -14,6 +14,7 @@ import {
 import { getCustomerId, hasCustomerSession } from "@/lib/customer-account/session";
 import { parseFavouriteIds } from "@/lib/favourites";
 import {
+  describeFavouritesError,
   loadFavourites,
   MAX_FAVOURITES,
   mergeForLogin,
@@ -54,7 +55,10 @@ async function readSaved(): Promise<LoadedFavourites> {
   }
 
   const customerId = await getCustomerId();
-  if (!customerId) return { ids: [], loaded: false };
+  if (!customerId) {
+    console.error("[favourites] load failed: signed in but the session has no customer ID");
+    return { ids: [], loaded: false };
+  }
   return loadFavourites({
     backend: {
       get: () => getBackendFavourites(customerId),
@@ -62,6 +66,9 @@ async function readSaved(): Promise<LoadedFavourites> {
     },
     // TODO(remove after favourites import is verified): one-time import source.
     readMetafield: getCustomerFavouriteIds,
+    // Never logs the customer ID: backend errors carry only status and path.
+    onError: (stage, error) =>
+      console.error(`[favourites] load failed (${stage}): ${describeFavouritesError(error)}`),
   });
 }
 
@@ -86,7 +93,10 @@ export async function getFavouritesState(): Promise<FavouritesStateResult> {
 
   // Deliberately no rethrow: this runs in the background on every page, so
   // an expiring session must not redirect the shopper away mid-browse.
-  const saved = await readSaved().catch(() => ({ ids: [], loaded: false }));
+  const saved = await readSaved().catch((error: unknown) => {
+    console.error(`[favourites] load failed: ${describeFavouritesError(error)}`);
+    return { ids: [] as string[], loaded: false };
+  });
   return { authenticated: true, ...saved };
 }
 

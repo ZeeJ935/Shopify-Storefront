@@ -1,5 +1,6 @@
 import Fastify, { type FastifyServerOptions } from "fastify";
 import { requireServiceToken } from "./auth.js";
+import { safeError } from "./errors.js";
 import type { CustomersRepo } from "./db/client.js";
 import type { FavouritesRepo } from "./db/favourites.js";
 import { favouritesRoutes } from "./routes/favourites.js";
@@ -27,6 +28,16 @@ export function buildApp({ serviceToken, customers, favourites, pingDb, logger =
             // Never log the service token or customer IDs.
             redact: ["req.headers.authorization", 'req.headers["x-customer-id"]'],
           },
+  });
+
+  // Our own error handler so 500s are logged without SQL parameters (customer IDs).
+  // 4xx errors (validation, bad JSON) keep Fastify's normal response.
+  app.setErrorHandler((error, request, reply) => {
+    const code = (error as { statusCode?: unknown } | null)?.statusCode;
+    const status = typeof code === "number" && code >= 400 ? code : 500;
+    if (status < 500) return reply.send(error);
+    request.log.error({ err: safeError(error), route: request.routeOptions.url }, "request failed");
+    return reply.code(500).send({ error: "internal_error" });
   });
 
   healthRoutes(app, pingDb);
