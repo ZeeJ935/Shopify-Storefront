@@ -91,6 +91,25 @@ describe("GET /health", () => {
     expect(res.json().webhooks.failedLast24h).toBeNull();
     await app.close();
   });
+
+  it("reports an Admin API warning as a field, still 200", async () => {
+    const lastSyncAt = new Date(Date.now() - 60 * 60 * 1000);
+    const app = buildApp({
+      serviceToken: TOKEN,
+      customers: fakeCustomers(),
+      favourites: fakeFavourites(),
+      webhooks: { secret: WEBHOOK_SECRET, intake: fakeWebhooks().intake },
+      pingDb: async () => {},
+      healthDetails: async () => ({ lastSyncAt, failedWebhooks24h: 0 }),
+      adminApiHealth: async () => ({ ok: false, warning: "Admin API returned 503" }),
+      logger: false,
+    });
+    const res = await app.inject({ method: "GET", url: "/health" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().adminApi).toEqual({ ok: false, warning: "Admin API returned 503" });
+    expect(res.json().ok).toBe(true);
+    await app.close();
+  });
 });
 
 describe("error reporting", () => {

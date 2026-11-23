@@ -1,3 +1,5 @@
+import { DEFAULT_ADMIN_API_VERSION } from "./shopify-admin/index.js";
+
 export type Env = {
   host: string;
   port: number;
@@ -10,6 +12,11 @@ export type Env = {
   /** Storefront API access for catalog sync; both optional (sync is off without them). */
   shopifyStoreDomain?: string;
   shopifyStorefrontToken?: string;
+  /** Admin API (Dev Dashboard client credentials). Optional; Admin features stay off without them. */
+  shopifyAdminClientId?: string;
+  shopifyAdminClientSecret?: string;
+  /** Pinned Admin GraphQL version (default 2026-10). */
+  shopifyAdminApiVersion: string;
 };
 
 /** Reads and validates the service's environment. Throws with a clear message when something is missing. */
@@ -31,6 +38,12 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error("STOREFRONT_URL must start with http:// or https://.");
   }
 
+  const adminVersionRaw = source.SHOPIFY_ADMIN_API_VERSION?.trim();
+  const shopifyAdminApiVersion = adminVersionRaw || DEFAULT_ADMIN_API_VERSION;
+  if (!/^\d{4}-\d{2}$/.test(shopifyAdminApiVersion)) {
+    throw new Error("SHOPIFY_ADMIN_API_VERSION must look like YYYY-MM (e.g. 2026-10).");
+  }
+
   return {
     host: source.HOST?.trim() || "127.0.0.1",
     port,
@@ -40,5 +53,8 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     storefrontUrl,
     shopifyStoreDomain: source.SHOPIFY_STORE_DOMAIN?.trim() || undefined,
     shopifyStorefrontToken: source.SHOPIFY_STOREFRONT_ACCESS_TOKEN?.trim() || undefined,
+    shopifyAdminClientId: source.SHOPIFY_ADMIN_CLIENT_ID?.trim() || undefined,
+    shopifyAdminClientSecret: source.SHOPIFY_ADMIN_CLIENT_SECRET?.trim() || undefined,
+    shopifyAdminApiVersion,
   };
 }

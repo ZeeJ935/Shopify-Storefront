@@ -19,7 +19,7 @@ The token is checked first, so a caller without it learns nothing about the othe
 
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
-| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, webhooks: { failedLast24h } }`. `503` only when the database is down; a stale sync (none in 26 h) or failed webhooks are fields, not a failure |
+| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, webhooks: { failedLast24h }, adminApi? }`. `503` only when the database is down; a stale sync (none in 26 h), failed webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
 | GET | `/v1/me` | token + customer ID | `{ customerId, firstSeenAt }`; records the customer (insert, or update `last_seen_at`) |
 | GET | `/v1/favourites` | token + customer ID | `{ ids, imported }` (`imported` is from the old one-time migration; the storefront ignores it) |
 | PUT | `/v1/favourites` | token + customer ID | Body `{ ids }`: replaces the whole list. Duplicates are collapsed; more than 200 → `400 too_many_favourites` |
@@ -46,8 +46,11 @@ Names only. Copy `.env.example` to `.env`.
 | `LOG_LEVEL` | Optional; default `info` |
 | `SHOPIFY_WEBHOOK_SECRET` | Shopify's webhook signing secret (Shopify admin → Settings → Notifications → Webhooks). Without it, webhooks get `500` so Shopify retries later |
 | `STOREFRONT_URL` | Storefront origin, for clearing its cache (`POST /api/revalidate`). Without it, catalog webhooks fail and retry |
-| `SHOPIFY_STORE_DOMAIN` | Storefront API domain for catalog sync (same as the storefront's). Without it and the token below, catalog sync is off |
+| `SHOPIFY_STORE_DOMAIN` | Store domain for Storefront catalog sync and Admin API (same as the storefront's). Without it and the Storefront token, catalog sync is off; without it and Admin client credentials, Admin is off |
 | `SHOPIFY_STOREFRONT_ACCESS_TOKEN` | Storefront API token for catalog sync (same as the storefront's) |
+| `SHOPIFY_ADMIN_CLIENT_ID` | Dev Dashboard app client ID for the Admin API (client credentials grant). Without it and the secret below, Admin stays off |
+| `SHOPIFY_ADMIN_CLIENT_SECRET` | Dev Dashboard app client secret for the Admin API |
+| `SHOPIFY_ADMIN_API_VERSION` | Pinned GraphQL Admin API version (default `2026-10`) |
 | `SENTRY_DSN` | Optional. Sentry project DSN; without it error reporting is off and nothing else changes |
 | `SENTRY_ENVIRONMENT` | Optional. Environment name shown in Sentry (default: `NODE_ENV`) |
 
@@ -146,7 +149,25 @@ Before anything is sent, request bodies (webhook payloads), cookies, query strin
 
 **Logs.** One JSON line per request: `reqId`, `method`, `route` (the pattern, never the URL, so no query strings), `status`, `durationMs`. Headers, bodies and webhook payloads are never logged; the service token, customer ID, signature and cookie headers are also redacted as a safety net.
 
-**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale` and `webhooks.failedLast24h` for slower problems.
+**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale`, `webhooks.failedLast24h`, and `adminApi` (when configured) for slower problems. An Admin API failure is a warning field, not a `503`.
+
+## Shopify Admin API
+
+The backend talks to the GraphQL Admin API with a **Dev Dashboard** app using the [client credentials grant](https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant) (`POST /admin/oauth/access_token`). Access tokens are cached in memory and refreshed from the response `expires_in` (and on `401`). Tokens are never logged.
+
+Admin is optional: without `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_ADMIN_CLIENT_ID`, and `SHOPIFY_ADMIN_CLIENT_SECRET`, the service starts as before and `/health` omits `adminApi`.
+
+**Project 3 scopes** (declare on the app version in the Dev Dashboard):
+
+- `read_products`
+- `read_inventory`
+- `write_inventory`
+- `read_locations`
+- `read_orders`
+- `read_merchant_managed_fulfillment_orders`
+- `write_merchant_managed_fulfillment_orders`
+
+`read_all_orders` is **not** added yet.
 
 ## Deploy on Render
 

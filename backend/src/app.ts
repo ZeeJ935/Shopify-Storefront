@@ -9,6 +9,7 @@ import { favouritesRoutes } from "./routes/favourites.js";
 import { healthRoutes, type HealthDetails } from "./routes/health.js";
 import type { ReportError } from "./report.js";
 import { meRoutes } from "./routes/me.js";
+import type { AdminApiHealth } from "./shopify-admin/index.js";
 
 export type AppDeps = {
   serviceToken: string;
@@ -17,6 +18,8 @@ export type AppDeps = {
   pingDb: () => Promise<void>;
   /** Extra /health fields: last catalog sync, failed webhooks (absent in tests that don't need them). */
   healthDetails?: () => Promise<HealthDetails>;
+  /** Admin API reachability for /health (omitted when Admin is not configured). */
+  adminApiHealth?: () => Promise<AdminApiHealth>;
   webhooks: WebhookRouteDeps;
   /** Catalog endpoints (absent in tests that don't need them). */
   catalog?: CatalogRouteDeps;
@@ -28,7 +31,19 @@ export type AppDeps = {
 };
 
 /** Builds the app with its dependencies injected, so tests can run without a database. */
-export function buildApp({ serviceToken, customers, favourites, pingDb, healthDetails, webhooks, catalog, logger = false, report, debugRoutes = false }: AppDeps) {
+export function buildApp({
+  serviceToken,
+  customers,
+  favourites,
+  pingDb,
+  healthDetails,
+  adminApiHealth,
+  webhooks,
+  catalog,
+  logger = false,
+  report,
+  debugRoutes = false,
+}: AppDeps) {
   const app = Fastify({
     // Strict bodies: no type coercion ("1" for 1, "x" for ["x"]) and no silently dropped fields.
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
@@ -76,7 +91,7 @@ export function buildApp({ serviceToken, customers, favourites, pingDb, healthDe
     return reply.code(500).send({ error: "internal_error" });
   });
 
-  healthRoutes(app, pingDb, healthDetails);
+  healthRoutes(app, pingDb, healthDetails, Date.now, adminApiHealth);
 
   // Public: Shopify signs these; the HMAC is the auth (no service token).
   app.register((instance) => webhookRoutes(instance, webhooks));

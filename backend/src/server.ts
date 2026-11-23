@@ -11,6 +11,7 @@ import { readEnv } from "./env.js";
 import { createWebhookQueue } from "./queue.js";
 import { createRevalidator, processWebhookEvent } from "./webhooks/process.js";
 import { createReporter } from "./report.js";
+import { createShopifyAdmin } from "./shopify-admin/index.js";
 
 const env = readEnv();
 const report = createReporter();
@@ -28,6 +29,19 @@ const source =
     : null;
 if (!source) console.warn("[catalog] SHOPIFY_STORE_DOMAIN / SHOPIFY_STOREFRONT_ACCESS_TOKEN not set: catalog sync is off");
 
+const admin =
+  env.shopifyStoreDomain && env.shopifyAdminClientId && env.shopifyAdminClientSecret
+    ? createShopifyAdmin({
+        storeDomain: env.shopifyStoreDomain,
+        clientId: env.shopifyAdminClientId,
+        clientSecret: env.shopifyAdminClientSecret,
+        apiVersion: env.shopifyAdminApiVersion,
+      })
+    : null;
+if (!admin) {
+  console.warn("[admin] SHOPIFY_ADMIN_CLIENT_ID / SHOPIFY_ADMIN_CLIENT_SECRET (and SHOPIFY_STORE_DOMAIN) not set: Admin API is off");
+}
+
 await queue.init();
 const catalogJobs = createCatalogJobs(queue.boss, report);
 
@@ -37,6 +51,7 @@ const app = buildApp({
   favourites: db.favourites,
   pingDb: db.ping,
   healthDetails: db.healthDetails,
+  adminApiHealth: admin ? () => admin.checkHealth() : undefined,
   report,
   debugRoutes: true,
   webhooks: { secret: env.shopifyWebhookSecret, intake: createWebhookIntake(db.pool, queue.enqueueOnClient) },
