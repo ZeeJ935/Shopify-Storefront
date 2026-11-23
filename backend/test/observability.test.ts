@@ -7,6 +7,7 @@ import { createReporter } from "../src/report.js";
 import { STALE_AFTER_MS, type HealthDetails } from "../src/routes/health.js";
 import { scrubEvent, scrubText } from "../src/sentry-scrub.js";
 import { processWebhookEvent } from "../src/webhooks/process.js";
+import { buildWebhookRegistry } from "../src/webhooks/registry.js";
 import { fakeCustomers, fakeFavourites, fakeWebhooks } from "./fakes.js";
 
 const TOKEN = "service-token-" + "s".repeat(40);
@@ -27,7 +28,7 @@ function setup({ details, dbUp = true, logLines }: { details?: () => Promise<Hea
     serviceToken: TOKEN,
     customers: fakeCustomers(),
     favourites: fakeFavourites(),
-    webhooks: { secret: WEBHOOK_SECRET, intake: fakeWebhooks().intake },
+    webhooks: fakeWebhooks().deps,
     pingDb: async () => {
       if (!dbUp) throw new Error("connect ECONNREFUSED");
     },
@@ -98,7 +99,7 @@ describe("GET /health", () => {
       serviceToken: TOKEN,
       customers: fakeCustomers(),
       favourites: fakeFavourites(),
-      webhooks: { secret: WEBHOOK_SECRET, intake: fakeWebhooks().intake },
+      webhooks: fakeWebhooks().deps,
       pingDb: async () => {},
       healthDetails: async () => ({ lastSyncAt, failedWebhooks24h: 0 }),
       adminApiHealth: async () => ({ ok: false, warning: "Admin API returned 503" }),
@@ -136,9 +137,11 @@ describe("error reporting", () => {
     const final: { eventId: number; topic: string }[] = [];
     const deps = {
       store: w.store,
-      revalidate: async () => {
-        throw new Error("revalidate returned 503");
-      },
+      router: buildWebhookRegistry({
+        revalidate: async () => {
+          throw new Error("revalidate returned 503");
+        },
+      }),
       onFinalFailure: (event: { eventId: number; topic: string }) => final.push(event),
     };
     for (let i = 0; i < 4; i++) await expect(processWebhookEvent(1, deps)).rejects.toThrow();

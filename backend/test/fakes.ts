@@ -1,6 +1,8 @@
 import type { CustomersRepo } from "../src/db/client.js";
 import type { FavouritesRepo } from "../src/db/favourites.js";
 import type { WebhookIntake, WebhookStore } from "../src/db/webhooks.js";
+import { buildWebhookRegistry } from "../src/webhooks/registry.js";
+import { createTopicRouter } from "../src/webhooks/router.js";
 
 /** In-memory customers repo. */
 export function fakeCustomers(): CustomersRepo & { touched: string[] } {
@@ -26,7 +28,6 @@ export function fakeFavourites(): FavouritesRepo & { lists: Map<string, string[]
       return { ids: get(customerId), imported: importedSet.has(customerId) };
     },
     async replace(customerId, ids) {
-      // Existing favourites keep their place; new ones go to the end.
       const kept = get(customerId).filter((id) => ids.includes(id));
       const next = [...kept, ...ids.filter((id) => !kept.includes(id))];
       lists.set(customerId, next);
@@ -53,6 +54,8 @@ export function fakeWebhooks() {
     failedAt: Date | null;
     attempts: number;
     lastError: string | null;
+    triggeredAt: string | null;
+    apiVersion: string | null;
   };
   const rows: Row[] = [];
   const queued: number[] = [];
@@ -67,6 +70,8 @@ export function fakeWebhooks() {
       failedAt: null,
       attempts: 0,
       lastError: null,
+      triggeredAt: event.triggeredAt ?? null,
+      apiVersion: event.apiVersion ?? null,
     };
     rows.push(row);
     if (event.handled) queued.push(row.id);
@@ -77,7 +82,13 @@ export function fakeWebhooks() {
       const row = rows.find((r) => r.id === id);
       if (!row || row.processedAt || row.failedAt) return null;
       row.attempts++;
-      return { topic: row.topic, attempts: row.attempts, payload: row.payload };
+      return {
+        topic: row.topic,
+        attempts: row.attempts,
+        payload: row.payload,
+        triggeredAt: row.triggeredAt,
+        apiVersion: row.apiVersion,
+      };
     },
     async markProcessed(id) {
       const row = rows.find((r) => r.id === id)!;
@@ -90,5 +101,19 @@ export function fakeWebhooks() {
       if (final) row.failedAt = new Date();
     },
   };
-  return { rows, queued, intake, store, deps: { secret: "whsec_test", intake } };
+  const router = buildWebhookRegistry({
+    revalidate: async () => {},
+  });
+  return {
+    rows,
+    queued,
+    intake,
+    store,
+    deps: { secrets: ["whsec_test"], intake, router },
+  };
+}
+
+/** Empty router for tests that inject their own handlers. */
+export function emptyRouter() {
+  return createTopicRouter();
 }

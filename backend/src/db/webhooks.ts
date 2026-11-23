@@ -5,10 +5,12 @@ export type IncomingWebhook = {
   webhookId: string;
   topic: string;
   shopDomain: string;
-  /** Null for topics we only record. */
+  /** Null for topics we only record; catalog keeps the body; others may be `{ id }` only. */
   payload: unknown;
-  /** True for catalog topics: they are queued for processing. */
+  /** True when a handler is registered: queued for processing. */
   handled: boolean;
+  triggeredAt?: string | null;
+  apiVersion?: string | null;
 };
 
 /** Records a webhook and (for handled topics) queues it, atomically. */
@@ -20,7 +22,13 @@ export type EnqueueOnClient = (client: pg.PoolClient, eventId: number) => Promis
 /** What processing needs from the database. Tests pass a fake. */
 export type WebhookStore = {
   /** Counts an attempt. Null when the event is missing, already processed, or already failed. */
-  beginAttempt(id: number): Promise<{ topic: string; attempts: number; payload: unknown } | null>;
+  beginAttempt(id: number): Promise<{
+    topic: string;
+    attempts: number;
+    payload: unknown;
+    triggeredAt: string | null;
+    apiVersion: string | null;
+  } | null>;
   markProcessed(id: number): Promise<void>;
   /** Keeps the error; `final` also marks the event failed. */
   markError(id: number, error: string, final: boolean): Promise<void>;
@@ -32,11 +40,19 @@ export function createWebhookIntake(pool: pg.Pool, enqueue: EnqueueOnClient): We
     try {
       await client.query("begin");
       const inserted = await client.query<{ id: string }>(
-        `insert into webhook_events (webhook_id, topic, shop_domain, payload, processed_at)
-         values ($1, $2, $3, $4, case when $5::boolean then null else now() end)
+        `insert into webhook_events (webhook_id, topic, shop_domain, payload, processed_at, triggered_at, api_version)
+         values ($1, $2, $3, $4, case when $5::boolean then null else now() end, $6::timestamptz, $7)
          on conflict (webhook_id) do nothing
          returning id`,
-        [event.webhookId, event.topic, event.shopDomain, event.payload === null ? null : JSON.stringify(event.payload), event.handled],
+        [
+          event.webhookId,
+          event.topic,
+          event.shopDomain,
+          event.payload === null ? null : JSON.stringify(event.payload),
+          event.handled,
+          event.triggeredAt ?? null,
+          event.apiVersion ?? null,
+        ],
       );
       if (inserted.rowCount === 0) {
         await client.query("rollback");
@@ -47,7 +63,6 @@ export function createWebhookIntake(pool: pg.Pool, enqueue: EnqueueOnClient): We
       await client.query("commit");
       return { duplicate: false, eventId };
     } catch (error) {
-      // Nothing is kept, so Shopify's retry is processed normally rather than seen as a duplicate.
       await client.query("rollback").catch(() => {});
       throw error;
     } finally {
@@ -59,13 +74,27 @@ export function createWebhookIntake(pool: pg.Pool, enqueue: EnqueueOnClient): We
 export function createWebhookStore(pool: pg.Pool): WebhookStore {
   return {
     async beginAttempt(id) {
-      const { rows } = await pool.query<{ topic: string; attempts: number; payload: unknown }>(
+      const { rows } = await pool.query<{
+        topic: string;
+        attempts: number;
+        payload: unknown;
+        triggered_at: Date | null;
+        api_version: string | null;
+      }>(
         `update webhook_events set attempts = attempts + 1
          where id = $1 and processed_at is null and failed_at is null
-         returning topic, attempts, payload`,
+         returning topic, attempts, payload, triggered_at, api_version`,
         [id],
       );
-      return rows[0] ?? null;
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        topic: row.topic,
+        attempts: row.attempts,
+        payload: row.payload,
+        triggeredAt: row.triggered_at ? row.triggered_at.toISOString() : null,
+        apiVersion: row.api_version,
+      };
     },
     async markProcessed(id) {
       await pool.query("update webhook_events set processed_at = now(), last_error = null where id = $1", [id]);

@@ -17,6 +17,8 @@ export type Env = {
   shopifyAdminClientSecret?: string;
   /** Pinned Admin GraphQL version (default 2026-10). */
   shopifyAdminApiVersion: string;
+  /** Public backend origin for app webhook subscriptions (no trailing slash). Optional at API start. */
+  backendPublicUrl?: string;
 };
 
 /** Reads and validates the service's environment. Throws with a clear message when something is missing. */
@@ -44,6 +46,11 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error("SHOPIFY_ADMIN_API_VERSION must look like YYYY-MM (e.g. 2026-10).");
   }
 
+  const backendPublicUrl = source.BACKEND_PUBLIC_URL?.trim().replace(/\/+$/, "") || undefined;
+  if (backendPublicUrl && !/^https?:\/\//.test(backendPublicUrl)) {
+    throw new Error("BACKEND_PUBLIC_URL must start with http:// or https://.");
+  }
+
   return {
     host: source.HOST?.trim() || "127.0.0.1",
     port,
@@ -56,5 +63,6 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     shopifyAdminClientId: source.SHOPIFY_ADMIN_CLIENT_ID?.trim() || undefined,
     shopifyAdminClientSecret: source.SHOPIFY_ADMIN_CLIENT_SECRET?.trim() || undefined,
     shopifyAdminApiVersion,
+    backendPublicUrl,
   };
 }

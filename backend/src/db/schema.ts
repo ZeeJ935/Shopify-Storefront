@@ -53,6 +53,10 @@ export const webhookEvents = pgTable(
     failedAt: timestamp("failed_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
+    /** X-Shopify-Triggered-At when Shopify sent it (nullable for older rows). */
+    triggeredAt: timestamp("triggered_at", { withTimezone: true }),
+    /** X-Shopify-Api-Version on the delivery (nullable for older rows). */
+    apiVersion: text("api_version"),
   },
   (t) => [index("webhook_events_pending_idx").on(t.processedAt, t.failedAt)],
 );

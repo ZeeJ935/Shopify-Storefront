@@ -8,6 +8,7 @@ import type { CatalogStore } from "../src/catalog/store.js";
 import type { CatalogSource } from "../src/catalog/storefront.js";
 import { fullSync, productIdFromPayload } from "../src/catalog/sync.js";
 import { processWebhookEvent } from "../src/webhooks/process.js";
+import { buildWebhookRegistry } from "../src/webhooks/registry.js";
 import { fakeCustomers, fakeFavourites, fakeWebhooks } from "./fakes.js";
 
 const parity = JSON.parse(fs.readFileSync(new URL("./fixtures/catalog-parity.json", import.meta.url), "utf8")) as {
@@ -136,11 +137,13 @@ describe("catalog webhooks", () => {
     let fail = true;
     const deps = {
       store: w.store,
-      revalidate: async () => void order.push("revalidate"),
-      catalog: async () => {
-        order.push("catalog");
-        if (fail) throw new Error("Storefront API returned 502");
-      },
+      router: buildWebhookRegistry({
+        revalidate: async () => void order.push("revalidate"),
+        catalog: async () => {
+          order.push("catalog");
+          if (fail) throw new Error("Storefront API returned 502");
+        },
+      }),
     };
     await expect(processWebhookEvent(1, deps)).rejects.toThrow("502");
     fail = false;

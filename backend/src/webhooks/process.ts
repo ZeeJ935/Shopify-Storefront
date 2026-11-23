@@ -1,12 +1,11 @@
 import { errorText, type WebhookStore } from "../db/webhooks.js";
-import { CATALOG_TOPICS, MAX_ATTEMPTS } from "./topics.js";
+import type { TopicRouter } from "./router.js";
+import { MAX_ATTEMPTS } from "./topics.js";
 
 export type ProcessDeps = {
   store: WebhookStore;
-  /** Tells Next.js to clear its catalog cache. Throws when that fails. */
-  revalidate: () => Promise<void>;
-  /** Updates the Postgres catalog for a catalog topic (absent when the catalog isn't configured). */
-  catalog?: (topic: string, payload: unknown) => Promise<void>;
+  /** Topic router: catalog + placeholders (and later inventory/orders). */
+  router: TopicRouter;
   /** Called once when an event fails its last allowed attempt (e.g. to report it to Sentry). */
   onFinalFailure?: (event: { eventId: number; topic: string }, error: unknown) => void;
   maxAttempts?: number;
@@ -17,18 +16,20 @@ export type ProcessResult = "processed" | "skipped" | "retrying" | "failed";
 /**
  * Processes one recorded webhook. Throws on failure so the queue retries it;
  * after the last allowed attempt the event is marked failed and the error kept.
+ * All handlers for the topic re-run on each attempt (handlers must be idempotent).
  */
 export async function processWebhookEvent(id: number, deps: ProcessDeps): Promise<ProcessResult> {
   const max = deps.maxAttempts ?? MAX_ATTEMPTS;
   const event = await deps.store.beginAttempt(id);
-  if (!event) return "skipped"; // already processed or failed (for example a redelivered job)
+  if (!event) return "skipped";
 
   try {
-    if (CATALOG_TOPICS.has(event.topic)) {
-      // Update our catalog first, then clear the storefront cache so it reads the new data.
-      if (deps.catalog) await deps.catalog(event.topic, event.payload);
-      await deps.revalidate();
-    }
+    await deps.router.dispatch({
+      topic: event.topic,
+      payload: event.payload,
+      triggeredAt: event.triggeredAt,
+      apiVersion: event.apiVersion,
+    });
     await deps.store.markProcessed(id);
     return "processed";
   } catch (error) {
@@ -36,7 +37,7 @@ export async function processWebhookEvent(id: number, deps: ProcessDeps): Promis
     await deps.store.markError(id, errorText(error), final);
     if (final) {
       deps.onFinalFailure?.({ eventId: id, topic: event.topic }, error);
-      return "failed"; // keep the error; stop retrying
+      return "failed";
     }
     throw error;
   }

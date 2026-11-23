@@ -44,13 +44,14 @@ Names only. Copy `.env.example` to `.env`.
 | `HOST` | Listen address (default `127.0.0.1`) |
 | `PORT` | Listen port (default `4000`) |
 | `LOG_LEVEL` | Optional; default `info` |
-| `SHOPIFY_WEBHOOK_SECRET` | Shopify's webhook signing secret (Shopify admin → Settings → Notifications → Webhooks). Without it, webhooks get `500` so Shopify retries later |
+| `SHOPIFY_WEBHOOK_SECRET` | Signing secret for webhooks created in Shopify admin. App subscriptions use `SHOPIFY_ADMIN_CLIENT_SECRET` instead. Either is accepted; if neither is set, webhooks get `500` |
 | `STOREFRONT_URL` | Storefront origin, for clearing its cache (`POST /api/revalidate`). Without it, catalog webhooks fail and retry |
 | `SHOPIFY_STORE_DOMAIN` | Store domain for Storefront catalog sync and Admin API (same as the storefront's). Without it and the Storefront token, catalog sync is off; without it and Admin client credentials, Admin is off |
 | `SHOPIFY_STOREFRONT_ACCESS_TOKEN` | Storefront API token for catalog sync (same as the storefront's) |
 | `SHOPIFY_ADMIN_CLIENT_ID` | Dev Dashboard app client ID for the Admin API (client credentials grant). Without it and the secret below, Admin stays off |
 | `SHOPIFY_ADMIN_CLIENT_SECRET` | Dev Dashboard app client secret for the Admin API |
 | `SHOPIFY_ADMIN_API_VERSION` | Pinned GraphQL Admin API version (default `2026-10`) |
+| `BACKEND_PUBLIC_URL` | Public origin of this API (no trailing slash). Used by `npm run webhooks:register`. Optional at API start |
 | `SENTRY_DSN` | Optional. Sentry project DSN; without it error reporting is off and nothing else changes |
 | `SENTRY_ENVIRONMENT` | Optional. Environment name shown in Sentry (default: `NODE_ENV`) |
 
@@ -71,14 +72,17 @@ Stop with Ctrl+C and `docker compose down`. The data volume is kept; `docker com
 
 ## Shopify webhooks
 
-`POST /webhooks/shopify` is public: Shopify signs every webhook, and the HMAC (`X-Shopify-Hmac-Sha256`, over the raw body, with `SHOPIFY_WEBHOOK_SECRET`) is the auth. A bad or missing signature gets `401`.
+`POST /webhooks/shopify` is public: Shopify signs every webhook, and the HMAC (`X-Shopify-Hmac-Sha256`, over the raw body) is the auth. **Either** `SHOPIFY_WEBHOOK_SECRET` (webhooks created in Shopify admin) **or** `SHOPIFY_ADMIN_CLIENT_SECRET` (app-created subscriptions) is accepted; each check is constant-time. A bad or missing signature gets `401`. If neither secret is set, the route returns `500` so Shopify retries later.
 
-1. **Record and dedupe.** Each webhook is stored once in `webhook_events`, keyed by `X-Shopify-Webhook-Id`. A repeat delivery gets `200 {"ok":true,"duplicate":true}` and is ignored. Storing the event and queueing it happen in one transaction, so a failure leaves nothing behind and Shopify's retry is processed normally.
+1. **Record and dedupe.** Each webhook is stored once in `webhook_events`, keyed by `X-Shopify-Webhook-Id`. A repeat delivery gets `200 {"ok":true,"duplicate":true}` and is ignored. Storing the event and queueing it happen in one transaction, so a failure leaves nothing behind and Shopify's retry is processed normally. `X-Shopify-Triggered-At` and `X-Shopify-Api-Version` are stored when present (`triggered_at`, `api_version`).
 2. **Answer fast.** The response is sent as soon as the event is stored; processing happens in the queue.
-3. **Process in a queue.** pg-boss (Postgres, schema `pgboss`; no Redis) runs in the API process. Catalog topics clear the storefront's cache by calling `POST {STOREFRONT_URL}/api/revalidate` with the service token.
-4. **Retry, then fail.** A failed attempt is retried with exponential backoff (about 30 s, 1, 2, 4 min), 5 attempts in total. After that the event gets `failed_at`, and `last_error` keeps the reason (no query values or secrets).
+3. **Topic router.** Handled topics are dispatched to an ordered list of handlers (several handlers can share one topic; on retry the whole chain re-runs — handlers must be idempotent). Catalog topics keep the previous behaviour. Placeholder handlers for orders/locations/inventory items/fulfillments log topic + id only until later steps fill them in.
+4. **Process in a queue.** pg-boss (Postgres, schema `pgboss`; no Redis) runs in the API process. Catalog topics clear the storefront's cache by calling `POST {STOREFRONT_URL}/api/revalidate` with the service token.
+5. **Retry, then fail.** A failed attempt is retried with exponential backoff (about 30 s, 1, 2, 4 min), 5 attempts in total. After that the event gets `failed_at`, and `last_error` keeps the reason (no query values or secrets).
 
-**Catalog topics:** `products/create`, `products/update`, `products/delete`, `collections/create`, `collections/update`, `collections/delete`, `inventory_levels/update`. Any other topic is recorded (without its payload) and ignored.
+**Catalog topics** (full payload stored): `products/create`, `products/update`, `products/delete`, `collections/create`, `collections/update`, `collections/delete`, `inventory_levels/update`.
+
+**Placeholder topics** (queued; payload stored as `{ id }` only — never emails, names, addresses or phones): `inventory_items/update`, `locations/create|update|delete`, `orders/create|paid|updated|cancelled`, `fulfillments/create|update`, and any `fulfillment_orders/*` topic. Unknown topics are recorded without a payload and ignored.
 
 **What's stuck or failed:**
 ```sql
@@ -167,7 +171,28 @@ Admin is optional: without `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_ADMIN_CLIENT_ID`, an
 - `read_merchant_managed_fulfillment_orders`
 - `write_merchant_managed_fulfillment_orders`
 
-`read_all_orders` is **not** added yet.
+`read_all_orders` is **not** added yet. `read_fulfillments` is also not added yet (needed before registering `fulfillments/*` subscriptions).
+
+### Register app webhook subscriptions
+
+Catalog webhooks (`products/*`, `collections/*`, `inventory_levels/update`) stay as **manual** subscriptions in Shopify admin. The app’s subscription list cannot see those, so registering them again would double-deliver every event. `npm run webhooks:register` therefore only creates app subscriptions for:
+
+| Topics | Scope |
+|--------|--------|
+| `inventory_items/update` | `read_inventory` |
+| `locations/create`, `update`, `delete` | `read_locations` |
+| `orders/create`, `paid`, `updated`, `cancelled` | `read_orders` (may fail until protected customer data access is approved — expected) |
+| selected `fulfillment_orders/*` (exact API names only) | `read_merchant_managed_fulfillment_orders` |
+
+`fulfillments/create` and `fulfillments/update` have placeholder handlers in the router but are **not** registered until the fulfillment step adds `read_fulfillments`.
+
+```bash
+# set BACKEND_PUBLIC_URL=https://<your-api>.onrender.com (and Admin env vars)
+npm run webhooks:register -- --dry-run   # print would_create / would_update / skipped
+npm run webhooks:register                # create/update; continues after per-topic failures; exit 1 if any failed
+```
+
+Callback URL: `{BACKEND_PUBLIC_URL}/webhooks/shopify`.
 
 ## Deploy on Render
 
@@ -193,3 +218,4 @@ The storefront needs these for its catalog and favourites: until they're set, ca
 | `npm run db:migrate` | Apply migrations in `drizzle/` |
 | `npm run db:migrate:prod` | Same, from the compiled `dist/` (used on Render) |
 | `npm run build` / `npm start` | Compile to `dist/` and run it |
+| `npm run webhooks:register` | Create/update app webhook subscriptions via Admin API (`--dry-run` supported) |

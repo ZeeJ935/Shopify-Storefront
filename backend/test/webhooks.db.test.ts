@@ -5,6 +5,7 @@ import { createDb } from "../src/db/client.js";
 import { createWebhookIntake, createWebhookStore } from "../src/db/webhooks.js";
 import { createWebhookQueue } from "../src/queue.js";
 import { processWebhookEvent } from "../src/webhooks/process.js";
+import { buildWebhookRegistry } from "../src/webhooks/registry.js";
 
 const url = process.env.DATABASE_URL;
 const run = randomUUID().slice(0, 8);
@@ -22,18 +23,16 @@ describe.skipIf(!url)("webhooks (Postgres + pg-boss)", () => {
   let failuresLeft = 0;
   let calls = 0;
   beforeAll(async () => {
-    await queue.start(async (eventId) =>
-      processWebhookEvent(eventId, {
-        store,
-        revalidate: async () => {
-          calls++;
-          if (failuresLeft > 0) {
-            failuresLeft--;
-            throw new Error("storefront down");
-          }
-        },
-      }),
-    );
+    const router = buildWebhookRegistry({
+      revalidate: async () => {
+        calls++;
+        if (failuresLeft > 0) {
+          failuresLeft--;
+          throw new Error("storefront down");
+        }
+      },
+    });
+    await queue.start(async (eventId) => processWebhookEvent(eventId, { store, router }));
   });
 
   /** Waits until a recorded webhook is processed (or 30 s pass); returns its row. */
