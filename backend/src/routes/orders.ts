@@ -13,8 +13,10 @@ const one = (q: Query, name: string) => {
   return (Array.isArray(v) ? v[0] : v)?.trim() || null;
 };
 
-export function ordersRoutes(app: FastifyInstance, deps: OrdersRouteDeps) {
-  app.get("/v1/orders", async (request, reply) => {
+/** `base` "/v1" (default) or "/admin"; `sync: false` leaves out POST {base}/orders/sync. */
+export function ordersRoutes(app: FastifyInstance, deps: OrdersRouteDeps, opts: { base?: string; sync?: boolean } = {}) {
+  const base = opts.base ?? "/v1";
+  app.get(`${base}/orders`, async (request, reply) => {
     const q = request.query as Query;
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(one(q, "limit") ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
     try {
@@ -34,13 +36,14 @@ export function ordersRoutes(app: FastifyInstance, deps: OrdersRouteDeps) {
     }
   });
 
-  app.get<{ Params: { id: string } }>("/v1/orders/:id", async (request, reply) => {
+  app.get<{ Params: { id: string } }>(`${base}/orders/:id`, async (request, reply) => {
     const order = await getOrderDetail(deps.pool, request.params.id);
     if (!order) return reply.code(404).send({ error: "not_found" });
     return order;
   });
 
-  app.post("/v1/orders/sync", async (_request, reply) => {
+  if (opts.sync === false) return;
+  app.post(`${base}/orders/sync`, async (_request, reply) => {
     if (!deps.enqueueFullSync) return reply.code(503).send({ error: "orders_sync_not_configured" });
     await deps.enqueueFullSync("manual");
     return reply.code(202).send({ queued: true });

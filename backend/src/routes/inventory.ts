@@ -13,10 +13,12 @@ const one = (q: Query, name: string) => {
   return (Array.isArray(v) ? v[0] : v)?.trim() || null;
 };
 
-export function inventoryRoutes(app: FastifyInstance, deps: InventoryRouteDeps) {
-  app.get("/v1/inventory/locations", async () => listLocations(deps.pool));
+/** `base` "/v1" (default) or "/admin"; `sync: false` leaves out POST {base}/inventory/sync. */
+export function inventoryRoutes(app: FastifyInstance, deps: InventoryRouteDeps, opts: { base?: string; sync?: boolean } = {}) {
+  const base = opts.base ?? "/v1";
+  app.get(`${base}/inventory/locations`, async () => listLocations(deps.pool));
 
-  app.get("/v1/inventory/levels", async (request, reply) => {
+  app.get(`${base}/inventory/levels`, async (request, reply) => {
     const q = request.query as Query;
     const low = one(q, "low_stock_below");
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(one(q, "limit") ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
@@ -34,13 +36,14 @@ export function inventoryRoutes(app: FastifyInstance, deps: InventoryRouteDeps) 
     }
   });
 
-  app.get<{ Params: { id: string } }>("/v1/inventory/items/:id", async (request, reply) => {
+  app.get<{ Params: { id: string } }>(`${base}/inventory/items/:id`, async (request, reply) => {
     const item = await getItemDetail(deps.pool, request.params.id);
     if (!item) return reply.code(404).send({ error: "not_found" });
     return item;
   });
 
-  app.post("/v1/inventory/sync", async (_request, reply) => {
+  if (opts.sync === false) return;
+  app.post(`${base}/inventory/sync`, async (_request, reply) => {
     if (!deps.enqueueFullSync) return reply.code(503).send({ error: "inventory_sync_not_configured" });
     await deps.enqueueFullSync("manual");
     return reply.code(202).send({ queued: true });

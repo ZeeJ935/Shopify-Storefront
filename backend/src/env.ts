@@ -1,3 +1,4 @@
+import { readAdminEnv, type AdminEnv } from "./admin/env.js";
 import { DEFAULT_ADMIN_API_VERSION } from "./shopify-admin/index.js";
 
 export type Env = {
@@ -21,6 +22,8 @@ export type Env = {
   backendPublicUrl?: string;
   /** GET /v1/debug/sentry (throws on purpose). Only when SENTRY_DEBUG=1. */
   debugRoutes: boolean;
+  /** Staff admin (/admin/*). Undefined = off. */
+  staffAdmin?: AdminEnv;
 };
 
 /** Reads and validates the service's environment. Throws with a clear message when something is missing. */
@@ -67,5 +70,6 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     shopifyAdminApiVersion,
     backendPublicUrl,
     debugRoutes: source.SENTRY_DEBUG?.trim() === "1",
+    staffAdmin: readAdminEnv(source),
   };
 }

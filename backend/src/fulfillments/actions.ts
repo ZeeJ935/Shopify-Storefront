@@ -135,7 +135,7 @@ async function localFulfillmentOrder(client: pg.PoolClient, foId: string) {
 export async function createFulfillmentAction(
   pool: pg.Pool,
   enqueue: EnqueueActionOnClient | undefined,
-  input: { key: string; request: FulfillmentRequest; dryRun: boolean },
+  input: { key: string; request: FulfillmentRequest; dryRun: boolean; createdByStaffId?: number | null },
 ): Promise<CreateActionResult> {
   const requestJson = JSON.stringify(input.request);
   const client = await pool.connect();
@@ -168,11 +168,11 @@ export async function createFulfillmentAction(
     }
 
     const inserted = await client.query<ActionRow>(
-      `insert into fulfillment_actions (idempotency_key, kind, fulfillment_order_shopify_id, request, dry_run, status)
-       values ($1, 'create', $2, $3::jsonb, $4, $5)
+      `insert into fulfillment_actions (idempotency_key, kind, fulfillment_order_shopify_id, request, dry_run, status, created_by_staff_id)
+       values ($1, 'create', $2, $3::jsonb, $4, $5, $6)
        on conflict (idempotency_key) do nothing
        returning ${ACTION_COLUMNS}`,
-      [input.key, input.request.fulfillmentOrderId, requestJson, input.dryRun, input.dryRun ? "dry_run" : "pending"],
+      [input.key, input.request.fulfillmentOrderId, requestJson, input.dryRun, input.dryRun ? "dry_run" : "pending", input.createdByStaffId ?? null],
     );
     if (!inserted.rows[0]) {
       // A concurrent request with the same key committed first (this insert waited for it).

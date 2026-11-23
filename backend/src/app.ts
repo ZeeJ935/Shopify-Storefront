@@ -10,6 +10,7 @@ import { healthRoutes, type HealthDetails } from "./routes/health.js";
 import { inventoryRoutes, type InventoryRouteDeps } from "./routes/inventory.js";
 import { ordersRoutes, type OrdersRouteDeps } from "./routes/orders.js";
 import { fulfillmentsRoutes, type FulfillmentRouteDeps } from "./routes/fulfillments.js";
+import { adminRoutes, type AdminRouteDeps } from "./admin/routes.js";
 import type { ReportError } from "./report.js";
 import { meRoutes } from "./routes/me.js";
 import type { AdminApiHealth } from "./shopify-admin/index.js";
@@ -32,6 +33,8 @@ export type AppDeps = {
   orders?: OrdersRouteDeps;
   /** Fulfillment actions (POST/GET /v1/fulfillments; absent in tests that don't need them). */
   fulfillments?: FulfillmentRouteDeps;
+  /** Staff admin API (/admin/*); absent when ADMIN_* env isn't configured. */
+  staffAdmin?: AdminRouteDeps;
   logger?: FastifyServerOptions["logger"];
   /** Where unexpected errors go (Sentry + log). */
   report?: ReportError;
@@ -52,6 +55,7 @@ export function buildApp({
   inventory,
   orders,
   fulfillments,
+  staffAdmin,
   logger = false,
   report,
   debugRoutes = false,
@@ -71,6 +75,8 @@ export function buildApp({
               'req.headers["x-customer-id"]',
               'req.headers["x-shopify-hmac-sha256"]',
               "req.headers.cookie",
+              'req.headers["x-staff-token"]',
+              'req.headers["x-admin-client-ip"]',
             ],
           },
     // One structured line per request instead of Fastify's two (see onResponse below).
@@ -107,6 +113,9 @@ export function buildApp({
 
   // Public: Shopify signs these; the HMAC is the auth (no service token).
   app.register((instance) => webhookRoutes(instance, webhooks));
+
+  // Staff admin: its own token + staff JWT; never the service token.
+  if (staffAdmin) adminRoutes(app, staffAdmin);
 
   // Everything under /v1 needs the service token.
   app.register(

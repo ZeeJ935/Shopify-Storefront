@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
 import {
   createFulfillmentAction,
@@ -15,7 +15,15 @@ export type FulfillmentRouteDeps = {
 
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{8,200}$/;
 
-const body = {
+/** Idempotency-Key header when well-formed (8–200 of A-Z a-z 0-9 . _ : -), else null. */
+export function readIdempotencyKey(request: FastifyRequest): string | null {
+  const raw = request.headers["idempotency-key"];
+  const key = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+  return key && IDEMPOTENCY_KEY.test(key) ? key : null;
+}
+
+/** Shared by POST /v1/fulfillments and POST /admin/fulfillments. */
+export const fulfillmentBodySchema = {
   type: "object",
   additionalProperties: false,
   required: ["fulfillment_order_id"],
@@ -46,7 +54,7 @@ const body = {
   },
 } as const;
 
-type Body = {
+export type FulfillmentBody = {
   fulfillment_order_id: string;
   lines?: { id: string; quantity: number }[];
   tracking?: { company?: string; number?: string; url?: string };
@@ -60,7 +68,7 @@ function gid(resource: "FulfillmentOrder" | "FulfillmentOrderLineItem", id: stri
 }
 
 /** Validates and normalizes the body; returns an error code for 400 responses. */
-export function normalizeRequest(b: Body): { request: FulfillmentRequest } | { error: string } {
+export function normalizeRequest(b: FulfillmentBody): { request: FulfillmentRequest } | { error: string } {
   const fulfillmentOrderId = gid("FulfillmentOrder", b.fulfillment_order_id);
   if (!fulfillmentOrderId) return { error: "invalid_fulfillment_order_id" };
 
@@ -96,10 +104,9 @@ export function normalizeRequest(b: Body): { request: FulfillmentRequest } | { e
  * the action and returns what would be sent, without calling Shopify.
  */
 export function fulfillmentsRoutes(app: FastifyInstance, deps: FulfillmentRouteDeps) {
-  app.post<{ Body: Body }>("/v1/fulfillments", { schema: { body } }, async (request, reply) => {
-    const raw = request.headers["idempotency-key"];
-    const key = (Array.isArray(raw) ? raw[0] : raw)?.trim();
-    if (!key || !IDEMPOTENCY_KEY.test(key)) return reply.code(400).send({ error: "invalid_idempotency_key" });
+  app.post<{ Body: FulfillmentBody }>("/v1/fulfillments", { schema: { body: fulfillmentBodySchema } }, async (request, reply) => {
+    const key = readIdempotencyKey(request);
+    if (!key) return reply.code(400).send({ error: "invalid_idempotency_key" });
 
     const normalized = normalizeRequest(request.body);
     if ("error" in normalized) return reply.code(400).send({ error: normalized.error });

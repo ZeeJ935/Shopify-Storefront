@@ -387,6 +387,8 @@ export const fulfillmentActions = pgTable(
     /** pending | submitting (Shopify call may have been sent) | succeeded | failed | dry_run */
     status: text("status").notNull(),
     shopifyFulfillmentId: text("shopify_fulfillment_id"),
+    /** Staff member who requested it via /admin; null for /v1 (service token) requests. */
+    createdByStaffId: bigint("created_by_staff_id", { mode: "number" }).references(() => staff.id, { onDelete: "set null" }),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -395,5 +397,52 @@ export const fulfillmentActions = pgTable(
   (t) => [
     index("fulfillment_actions_status_idx").on(t.status),
     index("fulfillment_actions_fo_idx").on(t.fulfillmentOrderShopifyId),
+  ],
+);
+
+/**
+ * Staff who signed in to the admin app (Google SSO + ADMIN_ALLOWLIST). Staff data,
+ * not customer data. role_at_last_login is informational: the allowlist decides access.
+ */
+export const staff = pgTable("staff", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  email: text("email").notNull().unique(),
+  googleSub: text("google_sub").notNull().unique(),
+  roleAtLastLogin: text("role_at_last_login").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Who did what in the admin API, when, to which resource, and the result.
+ * Never customer personal data or request bodies; `detail` holds allowlisted keys only.
+ * Changes (fulfillments, syncs) get a "pending" row BEFORE the action runs; it is then
+ * updated with the outcome. Rejected sign-ins keep only a hash of the email.
+ */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    staffId: bigint("staff_id", { mode: "number" }).references(() => staff.id, { onDelete: "set null" }),
+    staffEmail: text("staff_email"),
+    role: text("role"),
+    /** e.g. auth.login, fulfillment.create, sync.orders */
+    action: text("action").notNull(),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    /** pending | success | denied | rejected | error */
+    result: text("result").notNull(),
+    statusCode: integer("status_code"),
+    requestId: text("request_id"),
+    detail: jsonb("detail"),
+    /** When a pending row got its outcome. */
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("audit_log_at_idx").on(t.at.desc()),
+    index("audit_log_staff_idx").on(t.staffId),
+    index("audit_log_action_idx").on(t.action),
+    index("audit_log_resource_idx").on(t.resourceType, t.resourceId),
   ],
 );

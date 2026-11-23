@@ -1,5 +1,8 @@
 import "./instrument.js"; // first: Sentry must load before anything else
 import { buildApp } from "./app.js";
+import { createAuditStore } from "./admin/audit.js";
+import { createGoogleVerifier } from "./admin/google.js";
+import { createStaffStore } from "./admin/staff.js";
 import { createCatalogHandler } from "./catalog/handlers.js";
 import { createCatalogJobs } from "./catalog/jobs.js";
 import { createCatalogStore } from "./catalog/store.js";
@@ -156,6 +159,23 @@ const app = buildApp({
   orders: ordersSource ? { pool: db.pool, enqueueFullSync: ordersJobs.enqueueFullSync } : undefined,
   // Dry runs work without Admin; real fulfillments need it.
   fulfillments: { pool: db.pool, enqueueOnClient: admin ? fulfillmentJobs.enqueueOnClient : undefined },
+  // Staff admin (/admin/*): only when ADMIN_API_TOKEN, ADMIN_JWT_SECRET and ADMIN_GOOGLE_CLIENT_ID are set.
+  staffAdmin: env.staffAdmin
+    ? {
+        env: env.staffAdmin,
+        pool: db.pool,
+        verifyGoogle: createGoogleVerifier({ clientId: env.staffAdmin.googleClientId, hostedDomain: env.staffAdmin.googleHostedDomain }),
+        staff: createStaffStore(db.pool),
+        audit: createAuditStore(db.pool),
+        report,
+        sync: {
+          catalog: source ? catalogJobs.enqueueFullSync : undefined,
+          inventory: inventorySource ? inventoryJobs.enqueueFullSync : undefined,
+          orders: ordersSource ? ordersJobs.enqueueFullSync : undefined,
+        },
+        enqueueFulfillment: admin ? fulfillmentJobs.enqueueOnClient : undefined,
+      }
+    : undefined,
   logger: { level: process.env.LOG_LEVEL ?? "info" },
 });
 

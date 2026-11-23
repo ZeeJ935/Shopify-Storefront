@@ -64,6 +64,13 @@ Names only. Copy `.env.example` to `.env`.
 | `SENTRY_DSN` | Optional. Sentry project DSN; without it error reporting is off and nothing else changes |
 | `SENTRY_ENVIRONMENT` | Optional. Environment name shown in Sentry (default: `NODE_ENV`) |
 | `SENTRY_DEBUG` | Optional. `1` turns on `GET /v1/debug/sentry`; any other value or unset leaves it off (404) |
+| `ADMIN_API_TOKEN` | Optional (staff admin). Shared secret with the admin app's server for `/admin/*`; ≥32 chars, different from every other secret. All of `ADMIN_API_TOKEN`, `ADMIN_JWT_SECRET`, `ADMIN_GOOGLE_CLIENT_ID` unset → `/admin` is off; only some set → the service refuses to start |
+| `ADMIN_API_TOKEN_PREVIOUS` | Optional. Also accepted during rotation |
+| `ADMIN_JWT_SECRET` | Staff admin. Signs staff JWTs (HS256); ≥32 chars |
+| `ADMIN_JWT_SECRET_PREVIOUS` | Optional. Still verifies (never signs) during rotation |
+| `ADMIN_ALLOWLIST` | Staff admin. `email:role` entries, comma or newline separated; roles `viewer`, `operator`, `admin`. Bad entries stop the service from starting |
+| `ADMIN_GOOGLE_CLIENT_ID` | Staff admin. The admin app's Google OAuth client id (ID token audience) |
+| `ADMIN_GOOGLE_HOSTED_DOMAIN` | Optional. Only Google Workspace accounts of this domain may sign in |
 
 ## Run locally
 
@@ -276,6 +283,48 @@ npm run webhooks:register                # create/update; continues after per-to
 ```
 
 Callback URL: `{BACKEND_PUBLIC_URL}/webhooks/shopify`.
+
+## Staff admin API (`/admin/*`)
+
+For the internal admin app (`admin/`, built separately). Entirely separate from `/v1`: its own token, staff identity, roles and audit log. `/v1` behaves exactly as before.
+
+**How a staff member gets in**
+1. The admin app runs Google sign-in (authorization code + PKCE, `state`, `nonce`) on its server and gets a Google ID token.
+2. Its server calls `POST /admin/auth/exchange` (`Authorization: Bearer <ADMIN_API_TOKEN>`, body `{ idToken, nonce }`, and `x-admin-client-ip: <browser IP>` for rate limiting).
+3. The backend verifies the ID token against Google's published keys (issuer, audience = `ADMIN_GOOGLE_CLIENT_ID`, expiry, nonce, `email_verified`, `hd` if `ADMIN_GOOGLE_HOSTED_DOMAIN` is set), looks the email up in `ADMIN_ALLOWLIST`, records the `staff` row, and returns a **staff JWT** (15 min) plus `sessionExpiresAt` (sign-in + 8 h).
+4. Every other call sends `Authorization: Bearer <ADMIN_API_TOKEN>` **and** `X-Staff-Token: <jwt>`. The browser never calls the backend.
+5. `POST /admin/auth/refresh` (same headers) returns a new token. It re-checks the allowlist every time and **never extends past 8 hours from the original Google sign-in**; after that, sign in with Google again.
+
+**Staff JWT:** HS256 only (`none` and every other algorithm are rejected), `kid` derived from the key, issuer `zj-backend`, audience `zj-admin`, 30 s clock tolerance; claims `sub` (staff id), `email`, `role`, `sst` (sign-in time), `iat`, `exp`, `jti`. On every request the **current** allowlist decides: removed → 401, role changed → the new role applies immediately.
+
+**Sign-in errors** are deliberately identical: every exchange/refresh failure (not on the allowlist, bad or expired token, nonce mismatch, bad body, session over) returns `401 {"error":"sign_in_failed"}`. Both routes are rate limited per client IP in memory (exchange 10/min, refresh 30/min) → `429` with `Retry-After`.
+
+**Roles** (`viewer` < `operator` < `admin`; each includes the ones before):
+
+| Method | Path | Role |
+|--------|------|------|
+| POST | `/admin/auth/exchange`, `/admin/auth/refresh` | admin token only |
+| GET | `/admin/me` | viewer |
+| GET | `/admin/orders`, `/admin/orders/:id` | viewer (same filters/shape as `/v1`) |
+| GET | `/admin/inventory/locations`, `/levels`, `/items/:id` | viewer |
+| GET | `/admin/fulfillments/:key` | viewer |
+| POST | `/admin/fulfillments` | operator (same body as `/v1/fulfillments`, `Idempotency-Key` required; records `created_by_staff_id`) |
+| POST | `/admin/sync/catalog`, `/admin/sync/inventory`, `/admin/sync/orders` | admin |
+| GET | `/admin/audit?before=&limit=` | admin (newest first) |
+
+**Audit log** (`audit_log`): staff id/email, role, action, resource, result, status, request id, small `detail` (allowlisted keys only). Never customer data or request bodies.
+- **Changes fail closed:** `POST /admin/fulfillments` and `POST /admin/sync/*` write a `pending` row **before** acting; if that write fails the action is refused (`503 audit_unavailable`). The row is then completed (`success`, `rejected`, `error`).
+- **Best effort:** sign-ins (`auth.login`), refused refreshes, and every `403` (`denied`). A rejected sign-in stores only a keyed hash of the email.
+
+**Customer details:** the dashboard and these routes show **no customer names, emails or addresses** — we don't store them. If staff need them, they look the order up **in Shopify admin by its order number** (e.g. `#1007`).
+
+**Library:** `jose` **6.2.14** (pinned exactly), backend only. Zero dependencies, maintained, standards-complete JOSE implementation built on Node's WebCrypto; used for HS256 staff tokens and for verifying Google ID tokens against Google's JWKS (with caching). 6.2.14 rather than the newest release because it had been published for over two weeks when added.
+
+### Rotating secrets
+- **`ADMIN_API_TOKEN`:** set the old value as `ADMIN_API_TOKEN_PREVIOUS` and a new `ADMIN_API_TOKEN` on the backend → deploy → update the admin app's `ADMIN_API_TOKEN` → deploy → remove `ADMIN_API_TOKEN_PREVIOUS`.
+- **`ADMIN_JWT_SECRET`:** set the old value as `ADMIN_JWT_SECRET_PREVIOUS` and a new `ADMIN_JWT_SECRET` → deploy. Existing tokens keep working; refreshes get new-key tokens. Remove the previous value after 8 hours (the maximum session). **Emergency** (leaked key): replace it without setting a previous value; everyone signs in again.
+- **Remove someone:** delete them from `ADMIN_ALLOWLIST` and redeploy; their next request is refused.
+- Generate secrets with `openssl rand -base64 48`. Never reuse one secret for two variables (the service refuses to start).
 
 ## Deploy on Render
 
