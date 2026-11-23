@@ -44,8 +44,9 @@ describe("GET /health", () => {
   it("reports db, last sync and failed webhooks", async () => {
     const lastSyncAt = new Date(Date.now() - 60 * 60 * 1000);
     const inventoryLastSyncAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const ordersLastSyncAt = new Date(Date.now() - 3 * 60 * 60 * 1000);
     const { app } = setup({
-      details: async () => ({ lastSyncAt, inventoryLastSyncAt, failedWebhooks24h: 3 }),
+      details: async () => ({ lastSyncAt, inventoryLastSyncAt, ordersLastSyncAt, failedWebhooks24h: 3 }),
     });
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
@@ -54,6 +55,7 @@ describe("GET /health", () => {
       db: "up",
       catalog: { lastSyncAt: lastSyncAt.toISOString(), stale: false },
       inventory: { lastSyncAt: inventoryLastSyncAt.toISOString(), stale: false },
+      orders: { lastSyncAt: ordersLastSyncAt.toISOString(), stale: false },
       webhooks: { failedLast24h: 3 },
     });
     await app.close();
@@ -61,11 +63,19 @@ describe("GET /health", () => {
 
   it("flags a stale or missing sync as a warning, still 200", async () => {
     for (const lastSyncAt of [new Date(Date.now() - STALE_AFTER_MS - 60_000), null]) {
-      const { app } = setup({ details: async () => ({ lastSyncAt, inventoryLastSyncAt: lastSyncAt, failedWebhooks24h: 0 }) });
+      const { app } = setup({
+        details: async () => ({
+          lastSyncAt,
+          inventoryLastSyncAt: lastSyncAt,
+          ordersLastSyncAt: lastSyncAt,
+          failedWebhooks24h: 0,
+        }),
+      });
       const res = await app.inject({ method: "GET", url: "/health" });
       expect(res.statusCode).toBe(200);
       expect(res.json().catalog.stale).toBe(true);
       expect(res.json().inventory.stale).toBe(true);
+      expect(res.json().orders.stale).toBe(true);
       await app.close();
     }
   });

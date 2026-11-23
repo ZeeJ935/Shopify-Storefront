@@ -7,6 +7,8 @@ export type HealthDetails = {
   lastSyncAt: Date | null;
   /** When the last full inventory sync finished; null if never. */
   inventoryLastSyncAt?: Date | null;
+  /** When the last full orders sync finished; null if never. */
+  ordersLastSyncAt?: Date | null;
   /** Webhook events that failed their last retry in the past 24 hours. */
   failedWebhooks24h: number;
 };
@@ -55,6 +57,7 @@ export function healthRoutes(
     }
     const lastSyncAt = d?.lastSyncAt ?? null;
     const inventoryLastSyncAt = d?.inventoryLastSyncAt ?? null;
+    const ordersLastSyncAt = d?.ordersLastSyncAt ?? null;
     return {
       ok: true,
       db: "up",
@@ -65,6 +68,10 @@ export function healthRoutes(
       inventory: {
         lastSyncAt: inventoryLastSyncAt ? inventoryLastSyncAt.toISOString() : null,
         stale: !inventoryLastSyncAt || now() - inventoryLastSyncAt.getTime() > STALE_AFTER_MS,
+      },
+      orders: {
+        lastSyncAt: ordersLastSyncAt ? ordersLastSyncAt.toISOString() : null,
+        stale: !ordersLastSyncAt || now() - ordersLastSyncAt.getTime() > STALE_AFTER_MS,
       },
       webhooks: { failedLast24h: d ? d.failedWebhooks24h : null },
       ...(admin ? { adminApi: admin } : {}),

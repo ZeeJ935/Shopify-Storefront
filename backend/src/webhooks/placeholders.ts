@@ -1,14 +1,14 @@
 import type { TopicRouter, WebhookHandler } from "./router.js";
 import { resourceIdFromPayload } from "./payload.js";
 
-const ORDER_AND_FULFILLMENT_PLACEHOLDERS = [
+const ORDER_PLACEHOLDERS = [
   "orders/create",
   "orders/paid",
   "orders/updated",
   "orders/cancelled",
-  "fulfillments/create",
-  "fulfillments/update",
 ] as const;
+
+const FULFILLMENT_PLACEHOLDERS = ["fulfillments/create", "fulfillments/update"] as const;
 
 const LOCATION_AND_ITEM_PLACEHOLDERS = [
   "inventory_items/update",
@@ -36,12 +36,13 @@ export function createPlaceholderHandler(log: PlaceholderLog = () => {}): Webhoo
 export function registerPlaceholders(
   router: TopicRouter,
   log?: PlaceholderLog,
-  opts?: { skipLocationAndItem?: boolean },
+  opts?: { skipLocationAndItem?: boolean; skipOrders?: boolean },
 ): void {
   const handler = createPlaceholderHandler(log);
-  const topics = opts?.skipLocationAndItem
-    ? ORDER_AND_FULFILLMENT_PLACEHOLDERS
-    : [...LOCATION_AND_ITEM_PLACEHOLDERS, ...ORDER_AND_FULFILLMENT_PLACEHOLDERS];
+  const topics: string[] = [];
+  if (!opts?.skipLocationAndItem) topics.push(...LOCATION_AND_ITEM_PLACEHOLDERS);
+  if (!opts?.skipOrders) topics.push(...ORDER_PLACEHOLDERS);
+  topics.push(...FULFILLMENT_PLACEHOLDERS);
   for (const topic of topics) {
     router.register(topic, handler);
   }

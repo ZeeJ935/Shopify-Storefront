@@ -14,6 +14,8 @@ export type BuildRegistryOpts = {
     locationUpsert: WebhookHandler;
     locationDelete: WebhookHandler;
   };
+  /** Orders handler (Admin-backed). When set, replace order placeholders. */
+  orders?: WebhookHandler;
   logPlaceholder?: PlaceholderLog;
 };
 
@@ -52,8 +54,15 @@ export function buildWebhookRegistry(opts: BuildRegistryOpts): TopicRouter {
     router.register("locations/delete", opts.inventory.locationDelete);
   }
 
+  if (opts.orders) {
+    for (const topic of ["orders/create", "orders/paid", "orders/updated", "orders/cancelled"] as const) {
+      router.register(topic, opts.orders);
+    }
+  }
+
   registerPlaceholders(router, opts.logPlaceholder, {
     skipLocationAndItem: Boolean(opts.inventory),
+    skipOrders: Boolean(opts.orders),
   });
   return router;
 }

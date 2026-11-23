@@ -19,11 +19,14 @@ The token is checked first, so a caller without it learns nothing about the othe
 
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
-| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, inventory: { lastSyncAt, stale }, webhooks: { failedLast24h }, adminApi? }`. `503` only when the database is down; a stale catalog/inventory sync (none in 26 h), failed webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
+| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, inventory: { lastSyncAt, stale }, orders: { lastSyncAt, stale }, webhooks: { failedLast24h }, adminApi? }`. `503` only when the database is down; a stale catalog/inventory/orders sync (none in 26 h), failed webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
 | GET | `/v1/inventory/locations` | token | All locations (`id`, name, active, fulfillsOnlineOrders) |
 | GET | `/v1/inventory/levels` | token | Levels with optional `sku`, `location_id`, `low_stock_below`, `cursor`, `limit` (≤100). Keyset pagination; `nextCursor` when more |
 | GET | `/v1/inventory/items/:id` | token | Item by Shopify GID or numeric id, levels per location, last 20 history rows |
 | POST | `/v1/inventory/sync` | token | Queues a full inventory sync; `202` (`503` if Admin isn't configured) |
+| GET | `/v1/orders` | token | Orders with optional `status`, `financial_status`, `fulfillment_status`, `from`, `to`, `sku`, `cursor`, `limit` (≤100). Newest first; `nextCursor` when more |
+| GET | `/v1/orders/:id` | token | Order by Shopify GID or numeric id, with lines |
+| POST | `/v1/orders/sync` | token | Queues a full orders sync (last 60 days); `202` (`503` if Admin isn't configured) |
 | GET | `/v1/me` | token + customer ID | `{ customerId, firstSeenAt }`; records the customer (insert, or update `last_seen_at`) |
 | GET | `/v1/favourites` | token + customer ID | `{ ids, imported }` (`imported` is from the old one-time migration; the storefront ignores it) |
 | PUT | `/v1/favourites` | token + customer ID | Body `{ ids }`: replaces the whole list. Duplicates are collapsed; more than 200 → `400 too_many_favourites` |
@@ -88,7 +91,9 @@ Stop with Ctrl+C and `docker compose down`. The data volume is kept; `docker com
 
 **Inventory topics** (Admin re-fetch; payload id only for items/locations): `inventory_levels/update` (second handler), `inventory_items/update`, `locations/create|update|delete`.
 
-**Placeholder topics** (queued; payload stored as `{ id }` only — never emails, names, addresses or phones): `orders/create|paid|updated|cancelled`, `fulfillments/create|update`, and any `fulfillment_orders/*` topic. Unknown topics are recorded without a payload and ignored.
+**Orders topics** (Admin re-fetch; payload `{ id }` only): `orders/create`, `orders/paid`, `orders/updated`, `orders/cancelled`.
+
+**Placeholder topics** (queued; payload stored as `{ id }` only — never emails, names, addresses or phones): `fulfillments/create|update`, and any `fulfillment_orders/*` topic. Unknown topics are recorded without a payload and ignored.
 
 **What's stuck or failed:**
 ```sql
@@ -159,7 +164,7 @@ Before anything is sent, request bodies (webhook payloads), cookies, query strin
 
 **Logs.** One JSON line per request: `reqId`, `method`, `route` (the pattern, never the URL, so no query strings), `status`, `durationMs`. Headers, bodies and webhook payloads are never logged; the service token, customer ID, signature and cookie headers are also redacted as a safety net.
 
-**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale`, `inventory.stale`, `webhooks.failedLast24h`, and `adminApi` (when configured) for slower problems. An Admin API failure is a warning field, not a `503`.
+**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale`, `inventory.stale`, `orders.stale`, `webhooks.failedLast24h`, and `adminApi` (when configured) for slower problems. An Admin API failure is a warning field, not a `503`.
 
 ## Locations and inventory
 
@@ -170,6 +175,16 @@ Inventory lives in Postgres (`locations`, `inventory_items`, `inventory_levels`,
 - **A nightly full sync** (03:30 UTC, pg-boss). If the service was asleep then, it runs once on wake. Stale sync data never overwrites a newer webhook update (`shouldApply`). Missing rows are removed only after a complete successful read.
 
 **Backfill:** on first start with empty `locations`, a full sync is queued via the same singleton as manual sync (restarts do not pile up jobs). To run one by hand: `npm run inventory:backfill` (local), `npm run inventory:backfill:prod` (compiled), or `POST /v1/inventory/sync`.
+
+## Orders
+
+Orders live in Postgres (`orders`, `order_lines`, `orders_state`) synced from the **Admin GraphQL API** with `read_orders` only (last **60 days**). **No personal data** is stored or requested: no customer, email, phone, addresses, or notes. Staff that need those details fetch them live from Shopify later.
+
+**Kept in sync by:**
+- **Webhooks.** `orders/create|paid|updated|cancelled` use the payload `id` only, re-fetch the order from Admin, and upsert if `shouldApply` allows. `webhook_events` stores `{ id }` only. If Admin returns null or an access error (order older than 60 days), the event is logged (topic + id) and marked processed — no retry and no Sentry.
+- **A nightly full sync** (04:00 UTC). Pages orders with `updated_at` in the last 60 days (50 per page, nested lines in pages of 25). Never deletes older orders outside the window. Line prune for an order runs only after all of that order’s line pages were fetched, in one transaction with the upsert.
+
+**Backfill:** on first start with an empty `orders` table, a sync is queued via the same singleton as manual sync. To run one by hand: `npm run orders:backfill`, `npm run orders:backfill:prod`, or `POST /v1/orders/sync`.
 
 ## Shopify Admin API
 
@@ -236,4 +251,6 @@ The storefront needs these for its catalog and favourites: until they're set, ca
 | `npm run build` / `npm start` | Compile to `dist/` and run it |
 | `npm run inventory:backfill` | One-shot Admin inventory full sync (local) |
 | `npm run inventory:backfill:prod` | Same, from compiled `dist/` |
+| `npm run orders:backfill` | One-shot Admin orders sync, last 60 days (local) |
+| `npm run orders:backfill:prod` | Same, from compiled `dist/` |
 | `npm run webhooks:register` | Create/update app webhook subscriptions via Admin API (`--dry-run` supported) |

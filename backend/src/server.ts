@@ -13,6 +13,11 @@ import { createInventoryHandlers } from "./inventory/handlers.js";
 import { createInventoryJobs } from "./inventory/jobs.js";
 import { createInventoryStore } from "./inventory/store.js";
 import { fullSync as inventoryFullSync } from "./inventory/sync.js";
+import { createAdminOrdersSource } from "./orders/admin-source.js";
+import { createOrdersHandlers } from "./orders/handlers.js";
+import { createOrdersJobs } from "./orders/jobs.js";
+import { createOrdersStore } from "./orders/store.js";
+import { fullSync as ordersFullSync } from "./orders/sync.js";
 import { createWebhookQueue } from "./queue.js";
 import { createRevalidator, processWebhookEvent } from "./webhooks/process.js";
 import { createReporter } from "./report.js";
@@ -56,8 +61,11 @@ if (!admin) {
 await queue.init();
 const catalogJobs = createCatalogJobs(queue.boss, report);
 const inventoryJobs = createInventoryJobs(queue.boss, report);
+const ordersJobs = createOrdersJobs(queue.boss, report);
 const inventoryStore = createInventoryStore(db.pool);
+const ordersStore = createOrdersStore(db.pool);
 const inventorySource = admin ? createAdminInventorySource(admin) : null;
+const ordersSource = admin ? createAdminOrdersSource(admin) : null;
 
 const catalogHandler = source
   ? createCatalogHandler({ source, store: catalogStore, scheduleFullSync: catalogJobs.scheduleFullSync })
@@ -67,12 +75,24 @@ const inventoryHandlers = inventorySource
   ? createInventoryHandlers({ source: inventorySource, store: inventoryStore })
   : undefined;
 
+const logWebhookLine = (line: { topic: string; id: string | number | null; handler: string }) =>
+  console.info(JSON.stringify({ level: "info", msg: "webhook placeholder", ...line }));
+
+const ordersHandler = ordersSource
+  ? createOrdersHandlers({
+      source: ordersSource,
+      store: ordersStore,
+      logSkip: (line) => console.info(JSON.stringify({ level: "info", msg: "orders webhook skipped", ...line })),
+    })
+  : undefined;
+
 const webhookRouter = buildWebhookRegistry({
   catalog: catalogHandler,
   inventory: inventoryHandlers,
+  orders: ordersHandler,
   revalidate,
   // Structured line; no payload fields — placeholders only log topic + id.
-  logPlaceholder: (line) => console.info(JSON.stringify({ level: "info", msg: "webhook placeholder", ...line })),
+  logPlaceholder: logWebhookLine,
 });
 
 const app = buildApp({
@@ -93,6 +113,7 @@ const app = buildApp({
   inventory: inventorySource
     ? { pool: db.pool, enqueueFullSync: inventoryJobs.enqueueFullSync }
     : undefined,
+  orders: ordersSource ? { pool: db.pool, enqueueFullSync: ordersJobs.enqueueFullSync } : undefined,
   logger: { level: process.env.LOG_LEVEL ?? "info" },
 });
 
@@ -113,6 +134,14 @@ if (inventorySource) {
   });
   // Same singleton as POST /v1/inventory/sync — restarts on an empty store do not pile up jobs.
   if ((await inventoryStore.countLocations()) === 0) await inventoryJobs.enqueueFullSync("initial");
+}
+
+if (ordersSource) {
+  await ordersJobs.start(async (reason) => {
+    const result = await ordersFullSync({ source: ordersSource, store: ordersStore });
+    app.log.info({ reason, ...result }, "orders full sync finished");
+  });
+  if ((await ordersStore.countOrders()) === 0) await ordersJobs.enqueueFullSync("initial");
 }
 
 const webhookStore = createWebhookStore(db.pool);

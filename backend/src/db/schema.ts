@@ -221,3 +221,67 @@ export const inventoryState = pgTable("inventory_state", {
   id: integer("id").primaryKey().default(1),
   lastFullSyncAt: timestamp("last_full_sync_at", { withTimezone: true }),
 });
+
+/**
+ * Shopify orders without personal data (no customer, email, phone, address, notes).
+ * Money amounts are shop currency; currency code lives on the order row.
+ */
+export const orders = pgTable(
+  "orders",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    shopifyId: text("shopify_id").notNull().unique(),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    currency: text("currency"),
+    subtotal: numeric("subtotal"),
+    total: numeric("total"),
+    tax: numeric("tax"),
+    discount: numeric("discount"),
+    financialStatus: text("financial_status"),
+    fulfillmentStatus: text("fulfillment_status"),
+    cancelReason: text("cancel_reason"),
+    sourceName: text("source_name"),
+    test: boolean("test").notNull().default(false),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("orders_updated_at_idx").on(t.updatedAt),
+    index("orders_created_at_idx").on(t.createdAt),
+    index("orders_financial_status_idx").on(t.financialStatus),
+    index("orders_fulfillment_status_idx").on(t.fulfillmentStatus),
+  ],
+);
+
+/** Line items for an order. Cascades when the order is deleted. */
+export const orderLines = pgTable(
+  "order_lines",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    orderId: bigint("order_id", { mode: "number" })
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    shopifyId: text("shopify_id").notNull().unique(),
+    variantId: text("variant_id"),
+    productId: text("product_id"),
+    inventoryItemId: text("inventory_item_id"),
+    sku: text("sku"),
+    title: text("title").notNull(),
+    quantity: integer("quantity").notNull().default(0),
+    fulfillableQuantity: integer("fulfillable_quantity").notNull().default(0),
+    unitPrice: numeric("unit_price"),
+    discountedTotal: numeric("discounted_total"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("order_lines_order_idx").on(t.orderId), index("order_lines_sku_idx").on(t.sku)],
+);
+
+/** One row: when the last orders full sync finished. */
+export const ordersState = pgTable("orders_state", {
+  id: integer("id").primaryKey().default(1),
+  lastFullSyncAt: timestamp("last_full_sync_at", { withTimezone: true }),
+});
