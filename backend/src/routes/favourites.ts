@@ -34,7 +34,11 @@ export function favouritesRoutes(app: FastifyInstance, repo: FavouritesRepo) {
     return { ids: await repo.replace(request.customerId!, ids) };
   });
 
-  /** One-time import from the Shopify metafield. Safe to repeat; an oversized old list is trimmed, not rejected. */
+  /**
+   * One-time import used during the migration from the Shopify metafield (the storefront no
+   * longer calls it; kept for a possible manual re-import). Safe to repeat; an oversized
+   * old list is trimmed, not rejected.
+   */
   app.post<IdsBody>("/v1/favourites/import", { preHandler: requireCustomer, schema: { body } }, async (request) => {
     const ids = dedupe(request.body.ids).slice(0, MAX_FAVOURITES);
     return repo.importOnce(request.customerId!, ids);

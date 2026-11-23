@@ -68,16 +68,9 @@ The country dropdown lists the shop's markets from the Storefront API (`localiza
 - Account action failures show a generic message; Shopify API details go to the server log only
 - `/account` is disallowed in `robots.txt` and served with `noindex`
 
-## Favourites metafield (required)
+## Favourites
 
-Create a **Customer** metafield definition in Shopify Admin:
-
-1. Settings → Custom data → Customers → Add definition
-2. Namespace and key: `custom.favourites`
-3. Type: **JSON**
-4. Access → Customer account API: **Read and write**
-
-Without this, saving favourites returns “Access to this namespace and key on Metafields… is not allowed.”
+Favourites are stored in the backend's Postgres, not in Shopify, so no metafield setup is needed. Earlier versions kept them in the customer metafield `custom.favourites`; existing values there were left in place as a backup and are no longer read or written.
 
 ## Remaining gaps (intentional)
 

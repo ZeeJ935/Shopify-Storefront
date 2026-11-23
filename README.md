@@ -14,7 +14,7 @@ Next.js App Router storefront for a Shopify shop (Nike / Adidas demo catalog). U
 | Stock | Quantity limited to available stock, “Only N left”, sold-out and backorder states; Shopify’s stock warnings shown on cart lines |
 | Account | Login/signup via Shopify, overview, orders (newer/older paging), addresses CRUD with country list, profile |
 | Signed-in checkout | Cart is linked to the customer (buyer identity) on login, so checkout is tied to their account |
-| Favourites | Login-required hearts on cards/PDP; stored in Postgres via the backend (each customer's old `custom.favourites` metafield list is imported once). Without `BACKEND_URL` they fall back to the metafield |
+| Favourites | Login-required hearts on cards/PDP; stored in Postgres through the backend (`BACKEND_URL`). If the backend can't be reached, favourites show as not loaded and nothing is overwritten. Guests' hearts are kept in the browser and merged in on login |
 | Freshness | Shopify webhooks refresh catalog data within seconds; 2-minute timer as backup |
 | Security | Server-only tokens, sealed session cookies, checkout URL and `returnTo` checks, rate limiting, signed webhooks |
 | SEO | `sitemap.ts`, `robots.ts` (account/search excluded, `noindex`), Product JSON-LD, Shopify CDN images |
@@ -58,16 +58,7 @@ Copy from `.env.example`. Never prefix Storefront, Customer Account or backend s
 | `SENTRY_DEBUG` | Local testing only: `1` enables `GET /api/debug/sentry`, which throws on purpose |
 | `CSP_ENFORCE` | Optional. `1` enforces the Content-Security-Policy instead of Report-Only (see Content-Security-Policy) |
 
-Full Admin steps (Headless channel, New customer accounts, favourites metafield): **[docs/customer-accounts-admin.md](docs/customer-accounts-admin.md)**.
-
-### Favourites metafield (needed for the one-time import and the fallback)
-
-In Shopify Admin → **Settings → Custom data → Customers**:
-
-1. Add definition, namespace/key **`custom.favourites`**, type **JSON**
-2. **Customer Account API access:** Read and write
-
-Without this, the import can't read old favourites, and the fallback (no `BACKEND_URL`) can't save them. Once every customer's list has been imported, the metafield code is marked for removal (`TODO(remove after favourites import is verified)`).
+Full Admin steps (Headless channel, New customer accounts): **[docs/customer-accounts-admin.md](docs/customer-accounts-admin.md)**.
 
 ## Routes
 

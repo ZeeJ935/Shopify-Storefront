@@ -21,9 +21,9 @@ The token is checked first, so a caller without it learns nothing about the othe
 |--------|------|------|---------|
 | GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, webhooks: { failedLast24h } }`. `503` only when the database is down; a stale sync (none in 26 h) or failed webhooks are fields, not a failure |
 | GET | `/v1/me` | token + customer ID | `{ customerId, firstSeenAt }`; records the customer (insert, or update `last_seen_at`) |
-| GET | `/v1/favourites` | token + customer ID | `{ ids, imported }`. `imported: false` means the Shopify metafield hasn't been imported yet |
+| GET | `/v1/favourites` | token + customer ID | `{ ids, imported }` (`imported` is from the old one-time migration; the storefront ignores it) |
 | PUT | `/v1/favourites` | token + customer ID | Body `{ ids }`: replaces the whole list. Duplicates are collapsed; more than 200 → `400 too_many_favourites` |
-| POST | `/v1/favourites/import` | token + customer ID | Body `{ ids }`: one-time import from the metafield. A repeat call changes nothing (`imported: false`); more than 200 is trimmed |
+| POST | `/v1/favourites/import` | token + customer ID | Body `{ ids }`: one-time import used during the migration from the Shopify metafield. No longer called by the storefront; kept for a possible manual re-import. A repeat call changes nothing |
 | GET | `/v1/catalog` | token | Catalog query: `scope`, `brand`, `type`, `gender`, `size`, `color`, `sale`, `available`, `price_min`, `price_max`, `sort`, `page` or `cursor`, `limit` (≤100), `q`. Products, totals, facet counts, `nextCursor`; `empty: true` if nothing is synced yet |
 | GET | `/v1/products/by-ids` | token | `?ids=a,b` (≤250): products in the order asked, unknown IDs skipped |
 | GET | `/v1/catalog/overview` | token | Light product list in catalog order (handle, brand, image, dates) for the nav and sitemap |
@@ -157,7 +157,7 @@ Before anything is sent, request bodies (webhook payloads), cookies, query strin
 3. In Vercel → Project → Settings → Environment Variables, set `BACKEND_URL` and `BACKEND_SERVICE_TOKEN` for Production, then redeploy.
 4. Check `https://<your-api>.onrender.com/health` returns `{"ok":true,"db":"up"}`.
 
-Until step 3 is done, the storefront keeps using the Shopify metafield, so deploying the code first is safe.
+The storefront needs these for its catalog and favourites: until they're set, catalog pages show "couldn't load products" and favourites show as not loaded.
 
 **Plans:** `render.yaml` uses the paid Starter web service and Basic database. On the free plans, the API sleeps after 15 minutes idle (the first request then exceeds the storefront's 5 s timeout, so favourites show as not loaded), and a free database is deleted 30 days after creation, plus a 14-day grace period.
 

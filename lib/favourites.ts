@@ -1,8 +1,5 @@
 export const FAVOURITES_STORAGE_KEY = "zj_favourites";
 export const FAVOURITES_INTENT_KEY = "zj_favourites_intent";
-// TODO(remove after favourites import is verified): metafield location, used by the import and fallback.
-export const FAVOURITES_METAFIELD_NAMESPACE = "custom";
-export const FAVOURITES_METAFIELD_KEY = "favourites";
 
 export type FavouritesIntent = {
   returnTo: string;

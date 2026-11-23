@@ -1,6 +1,5 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { connection } from "next/server";
-import { parseFavouriteIds } from "@/lib/favourites";
 import { getCustomerAccountDiscovery } from "./discovery";
 import {
   getCustomerSession,
@@ -737,67 +736,4 @@ export async function updateCustomerProfile(input: {
   );
 
   return userErrorsToResult(data.customerUpdate.userErrors);
-}
-
-// TODO(remove after favourites import is verified): favourites now live in Postgres;
-// this is only the one-time import source and the fallback when BACKEND_URL is unset.
-export async function getCustomerFavouriteIds(): Promise<string[]> {
-  const data = await customerAccountFetch<{
-    customer: {
-      metafield: { value: string } | null;
-    };
-  }>(
-    `
-    query CustomerFavourites {
-      customer {
-        metafield(namespace: "custom", key: "favourites") {
-          value
-        }
-      }
-    }
-  `,
-    {},
-    { returnTo: "/account/favourites" },
-  );
-
-  return parseFavouriteIds(data.customer.metafield?.value ?? null);
-}
-
-// TODO(remove after favourites import is verified): only used by the metafield
-// fallback (BACKEND_URL unset). With the backend on, the metafield is never written.
-export async function setCustomerFavouriteIds(
-  ids: string[],
-): Promise<MutationResult> {
-  const profile = await getCustomerProfile();
-  const unique = [...new Set(ids.filter(Boolean))];
-
-  const data = await customerAccountFetch<{
-    metafieldsSet: {
-      metafields: { key: string }[] | null;
-      userErrors: UserError[];
-    };
-  }>(
-    `
-    mutation SetFavourites($metafields: [MetafieldsSetInput!]!) {
-      metafieldsSet(metafields: $metafields) {
-        metafields { key }
-        userErrors { field message code }
-      }
-    }
-  `,
-    {
-      metafields: [
-        {
-          ownerId: profile.id,
-          namespace: "custom",
-          key: "favourites",
-          type: "json",
-          value: JSON.stringify(unique),
-        },
-      ],
-    },
-    { returnTo: "/account/favourites" },
-  );
-
-  return userErrorsToResult(data.metafieldsSet.userErrors);
 }

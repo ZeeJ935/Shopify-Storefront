@@ -3,14 +3,9 @@
 import { unstable_rethrow } from "next/navigation";
 import {
   getBackendFavourites,
-  importBackendFavourites,
   isBackendConfigured,
   putBackendFavourites,
 } from "@/lib/backend";
-import {
-  getCustomerFavouriteIds,
-  setCustomerFavouriteIds,
-} from "@/lib/customer-account/api";
 import { getCustomerId, hasCustomerSession } from "@/lib/customer-account/session";
 import { parseFavouriteIds } from "@/lib/favourites";
 import {
@@ -33,53 +28,31 @@ export type FavouritesStateResult = {
   loaded: boolean;
 };
 
-// Where favourites live: Postgres (via the backend) once BACKEND_URL and
-// BACKEND_SERVICE_TOKEN are set, otherwise the Shopify metafield as before.
-// If the backend is configured but down, favourites show as not loaded; we do
-// NOT fall back to the metafield then, which would split data across two stores.
-let loggedStore = false;
-function postgresEnabled() {
-  const postgres = isBackendConfigured();
-  if (!loggedStore) {
-    loggedStore = true;
-    console.info(`[favourites] store: ${postgres ? "postgres" : "metafield"}`);
-  }
-  return postgres;
-}
+// Favourites live in Postgres, read and written through the backend. If the
+// backend isn't configured or can't be reached, favourites show as not loaded
+// and nothing is written, so a failed read can never overwrite saved favourites.
 
-/** The signed-in customer's saved list. Never writes unless it is the one-time metafield import. */
+/** The signed-in customer's saved list. */
 async function readSaved(): Promise<LoadedFavourites> {
-  if (!postgresEnabled()) {
-    // TODO(remove after favourites import is verified): metafield fallback.
-    // Errors propagate as before (an expired session redirects to refresh).
-    return { ids: await getCustomerFavouriteIds(), loaded: true };
+  if (!isBackendConfigured()) {
+    reportError(new Error("BACKEND_URL / BACKEND_SERVICE_TOKEN not set"), { area: "favourites", step: "load" });
+    return { ids: [], loaded: false };
   }
-
   const customerId = await getCustomerId();
   if (!customerId) {
     reportError(new Error("signed in but the session has no customer ID"), { area: "favourites", step: "load" });
     return { ids: [], loaded: false };
   }
   return loadFavourites({
-    backend: {
-      get: () => getBackendFavourites(customerId),
-      importOnce: (ids) => importBackendFavourites(customerId, ids),
-    },
-    // TODO(remove after favourites import is verified): one-time import source.
-    readMetafield: getCustomerFavouriteIds,
+    get: () => getBackendFavourites(customerId),
     // Never logs the customer ID: backend errors carry only status and path.
-    onError: (stage, error) =>
-      reportError(new Error(describeFavouritesError(error)), { area: "favourites", step: `load-${stage}` }),
+    onError: (error) => reportError(new Error(describeFavouritesError(error)), { area: "favourites", step: "load" }),
   });
 }
 
 /** Replaces the saved list. Returns an error message for the toast, or null. */
 async function writeSaved(ids: string[]): Promise<string | null> {
-  if (!postgresEnabled()) {
-    // TODO(remove after favourites import is verified): metafield fallback.
-    const result = await setCustomerFavouriteIds(ids);
-    return result.ok ? null : friendlyFavouritesError(result.message);
-  }
+  if (!isBackendConfigured()) return friendlyFavouritesError("unavailable");
   const customerId = await getCustomerId();
   if (!customerId) return "Sign in to sync favourites.";
   await putBackendFavourites(customerId, ids);
@@ -167,9 +140,6 @@ const FRIENDLY = new Set([UNAVAILABLE, "Sign in to sync favourites."]);
 function friendlyFavouritesError(message?: string) {
   const raw = message || "Could not save favourites.";
   if (FRIENDLY.has(raw)) return raw;
-  if (/namespace and key on Metafields|not allowed/i.test(raw)) {
-    return "Favourites aren’t set up in Shopify yet. In Admin, create a customer metafield custom.favourites (JSON) with Customer account access: Read and write.";
-  }
   if (raw === "unavailable" || /Backend request failed|BACKEND_|fetch failed|aborted|timeout/i.test(raw)) {
     reportError(new Error(raw), { area: "favourites", step: "backend" });
     return UNAVAILABLE;

@@ -1,6 +1,5 @@
 import "server-only";
 import { getCustomerId } from "@/lib/customer-account/session";
-import { pickFavouritesStore } from "@/lib/favourites-store";
 import type { CatalogRaw, ProductListItem } from "@/lib/catalog-shared/types";
 
 // Server-side client for the /backend service. The browser never calls the
@@ -19,10 +18,9 @@ export class BackendError extends Error {
   }
 }
 
-/** True when both backend variables are set. Until then, favourites stay on the Shopify metafield. */
+/** True when both backend variables are set (catalog and favourites need them). */
 export function isBackendConfigured() {
-  const { BACKEND_URL, BACKEND_SERVICE_TOKEN } = process.env;
-  return pickFavouritesStore({ BACKEND_URL, BACKEND_SERVICE_TOKEN }) === "postgres";
+  return Boolean(process.env.BACKEND_URL?.trim() && process.env.BACKEND_SERVICE_TOKEN?.trim());
 }
 
 function backendConfig() {
@@ -74,10 +72,6 @@ export function getBackendFavourites(customerId: string) {
 
 export async function putBackendFavourites(customerId: string, ids: string[]) {
   return (await backendFetch<{ ids: string[] }>("/v1/favourites", { customerId, method: "PUT", body: { ids } })).ids;
-}
-
-export function importBackendFavourites(customerId: string, ids: string[]) {
-  return backendFetch<BackendFavourites>("/v1/favourites/import", { customerId, method: "POST", body: { ids } });
 }
 
 export type BackendCatalog = CatalogRaw & { nextCursor: string | null; empty: boolean };
