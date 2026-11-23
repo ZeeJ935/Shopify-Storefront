@@ -5,6 +5,8 @@ import type { AdminApiHealth } from "../shopify-admin/index.js";
 export type HealthDetails = {
   /** When the last full catalog sync finished; null if never. */
   lastSyncAt: Date | null;
+  /** When the last full inventory sync finished; null if never. */
+  inventoryLastSyncAt?: Date | null;
   /** Webhook events that failed their last retry in the past 24 hours. */
   failedWebhooks24h: number;
 };
@@ -52,12 +54,17 @@ export function healthRoutes(
       app.log.warn({ err: safeError(error) }, "health details unavailable");
     }
     const lastSyncAt = d?.lastSyncAt ?? null;
+    const inventoryLastSyncAt = d?.inventoryLastSyncAt ?? null;
     return {
       ok: true,
       db: "up",
       catalog: {
         lastSyncAt: lastSyncAt ? lastSyncAt.toISOString() : null,
         stale: !lastSyncAt || now() - lastSyncAt.getTime() > STALE_AFTER_MS,
+      },
+      inventory: {
+        lastSyncAt: inventoryLastSyncAt ? inventoryLastSyncAt.toISOString() : null,
+        stale: !inventoryLastSyncAt || now() - inventoryLastSyncAt.getTime() > STALE_AFTER_MS,
       },
       webhooks: { failedLast24h: d ? d.failedWebhooks24h : null },
       ...(admin ? { adminApi: admin } : {}),

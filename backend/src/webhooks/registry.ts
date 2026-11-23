@@ -7,12 +7,19 @@ export type BuildRegistryOpts = {
   catalog?: (topic: string, payload: unknown) => Promise<void>;
   /** Clears the storefront catalog cache. Required for catalog topics (same as today). */
   revalidate: () => Promise<void>;
+  /** Inventory handlers (Admin-backed). When set, replace location/item placeholders. */
+  inventory?: {
+    levelsUpdate: WebhookHandler;
+    itemUpdate: WebhookHandler;
+    locationUpsert: WebhookHandler;
+    locationDelete: WebhookHandler;
+  };
   logPlaceholder?: PlaceholderLog;
 };
 
 /**
- * Default router: catalog topics keep exact current behaviour (catalog then revalidate);
- * placeholder topics log and finish. Multiple handlers per topic run in registration order.
+ * Default router: catalog topics keep exact current behaviour; inventory handlers
+ * sit between catalog and revalidate on inventory_levels/update.
  */
 export function buildWebhookRegistry(opts: BuildRegistryOpts): TopicRouter {
   const router = createTopicRouter();
@@ -32,9 +39,21 @@ export function buildWebhookRegistry(opts: BuildRegistryOpts): TopicRouter {
 
   for (const topic of CATALOG_TOPICS) {
     router.register(topic, catalogHandler);
+    if (topic === "inventory_levels/update" && opts.inventory) {
+      router.register(topic, opts.inventory.levelsUpdate);
+    }
     router.register(topic, revalidateHandler);
   }
 
-  registerPlaceholders(router, opts.logPlaceholder);
+  if (opts.inventory) {
+    router.register("inventory_items/update", opts.inventory.itemUpdate);
+    router.register("locations/create", opts.inventory.locationUpsert);
+    router.register("locations/update", opts.inventory.locationUpsert);
+    router.register("locations/delete", opts.inventory.locationDelete);
+  }
+
+  registerPlaceholders(router, opts.logPlaceholder, {
+    skipLocationAndItem: Boolean(opts.inventory),
+  });
   return router;
 }

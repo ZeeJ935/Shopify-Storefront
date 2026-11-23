@@ -12,14 +12,19 @@ export const FULL_SYNC_RETRY_LIMIT = 2;
  */
 export async function runSyncAttempt(
   run: (reason: string) => Promise<unknown>,
-  job: { reason: string; retryCount: number; retryLimit?: number },
+  job: { reason: string; retryCount: number; retryLimit?: number; jobName?: string },
   report?: ReportError,
 ) {
   try {
     await run(job.reason);
   } catch (error) {
     if (job.retryCount >= (job.retryLimit ?? FULL_SYNC_RETRY_LIMIT)) {
-      report?.(error, { kind: "job", job: FULL_SYNC_QUEUE, reason: job.reason, attempt: String(job.retryCount + 1) });
+      report?.(error, {
+        kind: "job",
+        job: job.jobName ?? FULL_SYNC_QUEUE,
+        reason: job.reason,
+        attempt: String(job.retryCount + 1),
+      });
     }
     throw error;
   }

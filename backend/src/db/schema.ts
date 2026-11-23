@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigserial, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, unique } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, unique } from "drizzle-orm/pg-core";
 
 /**
  * One row per Shopify customer the storefront has sent us.
@@ -136,4 +136,88 @@ export const catalogState = pgTable("catalog_state", {
   id: integer("id").primaryKey().default(1),
   lastFullSyncAt: timestamp("last_full_sync_at", { withTimezone: true }),
   bestSellingCount: integer("best_selling_count").notNull().default(0),
+});
+
+/** Shopify inventory locations (Admin API). */
+export const locations = pgTable("locations", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  shopifyId: text("shopify_id").notNull().unique(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+  fulfillsOnlineOrders: boolean("fulfills_online_orders").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Inventory items (one per product variant). */
+export const inventoryItems = pgTable(
+  "inventory_items",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    shopifyId: text("shopify_id").notNull().unique(),
+    variantId: text("variant_id"),
+    productId: text("product_id"),
+    sku: text("sku"),
+    tracked: boolean("tracked").notNull().default(true),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("inventory_items_sku_idx").on(t.sku)],
+);
+
+/** Quantities for one inventory item at one location. */
+export const inventoryLevels = pgTable(
+  "inventory_levels",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" })
+      .notNull()
+      .references(() => inventoryItems.id, { onDelete: "cascade" }),
+    locationId: bigint("location_id", { mode: "number" })
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    available: integer("available").notNull().default(0),
+    onHand: integer("on_hand").notNull().default(0),
+    committed: integer("committed").notNull().default(0),
+    incoming: integer("incoming").notNull().default(0),
+    shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("inventory_levels_item_location_unique").on(t.inventoryItemId, t.locationId),
+    index("inventory_levels_location_idx").on(t.locationId),
+    index("inventory_levels_item_idx").on(t.inventoryItemId),
+  ],
+);
+
+/**
+ * Audit of available-quantity changes. FKs SET NULL on delete so history survives;
+ * shopify ids stay on the row for identification after the parent is gone.
+ */
+export const inventoryLevelHistory = pgTable(
+  "inventory_level_history",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    inventoryItemId: bigint("inventory_item_id", { mode: "number" }).references(() => inventoryItems.id, {
+      onDelete: "set null",
+    }),
+    locationId: bigint("location_id", { mode: "number" }).references(() => locations.id, { onDelete: "set null" }),
+    itemShopifyId: text("item_shopify_id").notNull(),
+    locationShopifyId: text("location_shopify_id").notNull(),
+    availableBefore: integer("available_before").notNull(),
+    availableAfter: integer("available_after").notNull(),
+    source: text("source").notNull(),
+    shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("inventory_level_history_item_idx").on(t.itemShopifyId),
+    index("inventory_level_history_created_idx").on(t.createdAt),
+  ],
+);
+
+/** One row: when the last inventory full sync finished. */
+export const inventoryState = pgTable("inventory_state", {
+  id: integer("id").primaryKey().default(1),
+  lastFullSyncAt: timestamp("last_full_sync_at", { withTimezone: true }),
 });

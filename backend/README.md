@@ -19,7 +19,11 @@ The token is checked first, so a caller without it learns nothing about the othe
 
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
-| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, webhooks: { failedLast24h }, adminApi? }`. `503` only when the database is down; a stale sync (none in 26 h), failed webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
+| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, inventory: { lastSyncAt, stale }, webhooks: { failedLast24h }, adminApi? }`. `503` only when the database is down; a stale catalog/inventory sync (none in 26 h), failed webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
+| GET | `/v1/inventory/locations` | token | All locations (`id`, name, active, fulfillsOnlineOrders) |
+| GET | `/v1/inventory/levels` | token | Levels with optional `sku`, `location_id`, `low_stock_below`, `cursor`, `limit` (≤100). Keyset pagination; `nextCursor` when more |
+| GET | `/v1/inventory/items/:id` | token | Item by Shopify GID or numeric id, levels per location, last 20 history rows |
+| POST | `/v1/inventory/sync` | token | Queues a full inventory sync; `202` (`503` if Admin isn't configured) |
 | GET | `/v1/me` | token + customer ID | `{ customerId, firstSeenAt }`; records the customer (insert, or update `last_seen_at`) |
 | GET | `/v1/favourites` | token + customer ID | `{ ids, imported }` (`imported` is from the old one-time migration; the storefront ignores it) |
 | PUT | `/v1/favourites` | token + customer ID | Body `{ ids }`: replaces the whole list. Duplicates are collapsed; more than 200 → `400 too_many_favourites` |
@@ -76,13 +80,15 @@ Stop with Ctrl+C and `docker compose down`. The data volume is kept; `docker com
 
 1. **Record and dedupe.** Each webhook is stored once in `webhook_events`, keyed by `X-Shopify-Webhook-Id`. A repeat delivery gets `200 {"ok":true,"duplicate":true}` and is ignored. Storing the event and queueing it happen in one transaction, so a failure leaves nothing behind and Shopify's retry is processed normally. `X-Shopify-Triggered-At` and `X-Shopify-Api-Version` are stored when present (`triggered_at`, `api_version`).
 2. **Answer fast.** The response is sent as soon as the event is stored; processing happens in the queue.
-3. **Topic router.** Handled topics are dispatched to an ordered list of handlers (several handlers can share one topic; on retry the whole chain re-runs — handlers must be idempotent). Catalog topics keep the previous behaviour. Placeholder handlers for orders/locations/inventory items/fulfillments log topic + id only until later steps fill them in.
+3. **Topic router.** Handled topics are dispatched to an ordered list of handlers (several handlers can share one topic; on retry the whole chain re-runs — handlers must be idempotent). On `inventory_levels/update` the order is catalog → inventory → revalidate. Placeholder handlers for orders/fulfillments log topic + id only until later steps fill them in.
 4. **Process in a queue.** pg-boss (Postgres, schema `pgboss`; no Redis) runs in the API process. Catalog topics clear the storefront's cache by calling `POST {STOREFRONT_URL}/api/revalidate` with the service token.
 5. **Retry, then fail.** A failed attempt is retried with exponential backoff (about 30 s, 1, 2, 4 min), 5 attempts in total. After that the event gets `failed_at`, and `last_error` keeps the reason (no query values or secrets).
 
 **Catalog topics** (full payload stored): `products/create`, `products/update`, `products/delete`, `collections/create`, `collections/update`, `collections/delete`, `inventory_levels/update`.
 
-**Placeholder topics** (queued; payload stored as `{ id }` only — never emails, names, addresses or phones): `inventory_items/update`, `locations/create|update|delete`, `orders/create|paid|updated|cancelled`, `fulfillments/create|update`, and any `fulfillment_orders/*` topic. Unknown topics are recorded without a payload and ignored.
+**Inventory topics** (Admin re-fetch; payload id only for items/locations): `inventory_levels/update` (second handler), `inventory_items/update`, `locations/create|update|delete`.
+
+**Placeholder topics** (queued; payload stored as `{ id }` only — never emails, names, addresses or phones): `orders/create|paid|updated|cancelled`, `fulfillments/create|update`, and any `fulfillment_orders/*` topic. Unknown topics are recorded without a payload and ignored.
 
 **What's stuck or failed:**
 ```sql
@@ -153,7 +159,17 @@ Before anything is sent, request bodies (webhook payloads), cookies, query strin
 
 **Logs.** One JSON line per request: `reqId`, `method`, `route` (the pattern, never the URL, so no query strings), `status`, `durationMs`. Headers, bodies and webhook payloads are never logged; the service token, customer ID, signature and cookie headers are also redacted as a safety net.
 
-**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale`, `webhooks.failedLast24h`, and `adminApi` (when configured) for slower problems. An Admin API failure is a warning field, not a `503`.
+**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale`, `inventory.stale`, `webhooks.failedLast24h`, and `adminApi` (when configured) for slower problems. An Admin API failure is a warning field, not a `503`.
+
+## Locations and inventory
+
+Inventory lives in Postgres (`locations`, `inventory_items`, `inventory_levels`, `inventory_level_history`, `inventory_state`) and is kept in sync from the **Admin GraphQL API** (paged reads; no bulk operations). Nested levels are fetched in pages of 25; remaining pages for an item are always followed.
+
+**Kept in sync by:**
+- **Webhooks.** `inventory_levels/update` re-fetches that level from Admin (payload ids only) and upserts if `shouldApply` allows; history is written when `available` changes. Catalog still schedules a debounced full product sync on the same topic. `inventory_items/update` and `locations/create|update|delete` re-fetch or delete accordingly. Deleting a location cascades its levels; history rows are kept (`ON DELETE SET NULL` plus denormalized Shopify ids).
+- **A nightly full sync** (03:30 UTC, pg-boss). If the service was asleep then, it runs once on wake. Stale sync data never overwrites a newer webhook update (`shouldApply`). Missing rows are removed only after a complete successful read.
+
+**Backfill:** on first start with empty `locations`, a full sync is queued via the same singleton as manual sync (restarts do not pile up jobs). To run one by hand: `npm run inventory:backfill` (local), `npm run inventory:backfill:prod` (compiled), or `POST /v1/inventory/sync`.
 
 ## Shopify Admin API
 
@@ -218,4 +234,6 @@ The storefront needs these for its catalog and favourites: until they're set, ca
 | `npm run db:migrate` | Apply migrations in `drizzle/` |
 | `npm run db:migrate:prod` | Same, from the compiled `dist/` (used on Render) |
 | `npm run build` / `npm start` | Compile to `dist/` and run it |
+| `npm run inventory:backfill` | One-shot Admin inventory full sync (local) |
+| `npm run inventory:backfill:prod` | Same, from compiled `dist/` |
 | `npm run webhooks:register` | Create/update app webhook subscriptions via Admin API (`--dry-run` supported) |

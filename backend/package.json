@@ -17,6 +17,8 @@
     "db:migrate:prod": "node --env-file-if-exists=.env dist/migrate.js",
     "catalog:backfill": "tsx --env-file-if-exists=.env src/catalog/backfill.ts",
     "catalog:backfill:prod": "node --env-file-if-exists=.env dist/catalog/backfill.js",
+    "inventory:backfill": "tsx --env-file-if-exists=.env src/inventory/backfill.ts",
+    "inventory:backfill:prod": "node --env-file-if-exists=.env dist/inventory/backfill.js",
     "webhooks:register": "tsx --env-file-if-exists=.env src/webhooks/register.ts",
     "sync:shared": "rm -rf src/catalog-shared && cp -R ../lib/catalog-shared src/catalog-shared"
   },

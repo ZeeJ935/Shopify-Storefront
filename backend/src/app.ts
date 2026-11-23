@@ -7,6 +7,7 @@ import { webhookRoutes, type WebhookRouteDeps } from "./routes/webhooks.js";
 import { catalogRoutes, type CatalogRouteDeps } from "./routes/catalog.js";
 import { favouritesRoutes } from "./routes/favourites.js";
 import { healthRoutes, type HealthDetails } from "./routes/health.js";
+import { inventoryRoutes, type InventoryRouteDeps } from "./routes/inventory.js";
 import type { ReportError } from "./report.js";
 import { meRoutes } from "./routes/me.js";
 import type { AdminApiHealth } from "./shopify-admin/index.js";
@@ -23,6 +24,8 @@ export type AppDeps = {
   webhooks: WebhookRouteDeps;
   /** Catalog endpoints (absent in tests that don't need them). */
   catalog?: CatalogRouteDeps;
+  /** Inventory endpoints (absent when Admin isn't configured). */
+  inventory?: InventoryRouteDeps;
   logger?: FastifyServerOptions["logger"];
   /** Where unexpected errors go (Sentry + log). */
   report?: ReportError;
@@ -40,6 +43,7 @@ export function buildApp({
   adminApiHealth,
   webhooks,
   catalog,
+  inventory,
   logger = false,
   report,
   debugRoutes = false,
@@ -103,6 +107,7 @@ export function buildApp({
       meRoutes(v1, customers);
       favouritesRoutes(v1, favourites);
       if (catalog) catalogRoutes(v1, catalog);
+      if (inventory) inventoryRoutes(v1, inventory);
       // Throws on purpose so error reporting can be checked end to end.
       if (debugRoutes) {
         v1.get("/v1/debug/sentry", async () => {
