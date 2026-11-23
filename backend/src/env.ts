@@ -7,6 +7,9 @@ export type Env = {
   shopifyWebhookSecret?: string;
   /** Storefront origin for cache clearing (POST /api/revalidate). */
   storefrontUrl?: string;
+  /** Storefront API access for catalog sync; both optional (sync is off without them). */
+  shopifyStoreDomain?: string;
+  shopifyStorefrontToken?: string;
 };
 
 /** Reads and validates the service's environment. Throws with a clear message when something is missing. */
@@ -35,5 +38,7 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     serviceToken,
     shopifyWebhookSecret: source.SHOPIFY_WEBHOOK_SECRET?.trim() || undefined,
     storefrontUrl,
+    shopifyStoreDomain: source.SHOPIFY_STORE_DOMAIN?.trim() || undefined,
+    shopifyStorefrontToken: source.SHOPIFY_STOREFRONT_ACCESS_TOKEN?.trim() || undefined,
   };
 }

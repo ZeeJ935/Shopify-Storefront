@@ -17,15 +17,24 @@ export function createWebhookQueue(
   const boss = new PgBoss({ connectionString: databaseUrl, max: 3 });
   boss.on("error", (error) => console.error("[queue]", error instanceof Error ? error.message : error));
 
-  return {
-    name,
-    async start(handle: (eventId: number) => Promise<unknown>) {
+  let initialized: Promise<void> | null = null;
+  /** Starts pg-boss and creates the webhook queue (once). */
+  const init = () =>
+    (initialized ??= (async () => {
       await boss.start();
       await boss.createQueue(name, {
         retryLimit: MAX_ATTEMPTS - 1,
         retryDelay: retryDelaySeconds,
         retryBackoff: true,
       });
+    })());
+
+  return {
+    name,
+    boss,
+    init,
+    async start(handle: (eventId: number) => Promise<unknown>) {
+      await init();
       await boss.work<WebhookJob>(name, async (jobs) => {
         for (const job of jobs) await handle(job.data.eventId);
       });

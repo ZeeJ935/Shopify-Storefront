@@ -29,6 +29,11 @@ services:
       # The storefront's public origin, e.g. https://shopify-storefront-ruby.vercel.app
       - key: STOREFRONT_URL
         sync: false
+      # Catalog sync: same values as the storefront's.
+      - key: SHOPIFY_STORE_DOMAIN
+        sync: false
+      - key: SHOPIFY_STOREFRONT_ACCESS_TOKEN
+        sync: false
 
 databases:
   - name: zj-backend-db

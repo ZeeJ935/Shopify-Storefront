@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { getCatalogSnapshot } from "@/lib/catalog-snapshot";
+import { getCatalogProductList } from "@/lib/catalog-source";
 import { getCollectionsIndex } from "@/lib/collections";
 import { getSiteUrl } from "@/lib/site-url";
 
@@ -24,9 +24,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ];
 
   try {
-    const [collections, snapshot] = await Promise.all([
+    const [collections, catalogProducts] = await Promise.all([
       getCollectionsIndex(50),
-      getCatalogSnapshot(),
+      getCatalogProductList(),
     ]);
 
     for (const collection of collections) {
@@ -37,7 +37,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       });
     }
 
-    for (const product of snapshot.products) {
+    for (const product of catalogProducts) {
       entries.push({
         url: `${siteUrl}/products/${product.handle}`,
         changeFrequency: "weekly",

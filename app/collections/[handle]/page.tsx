@@ -3,11 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import SiteContainer from "@/app/components/site-container";
-import {
-  parseCatalogParams,
-  queryCatalog,
-} from "@/lib/catalog-query";
-import { getCatalogSnapshot } from "@/lib/catalog-snapshot";
+import { parseCatalogParams } from "@/lib/catalog-query";
+import { queryCatalog } from "@/lib/catalog-source";
 import { shopifyFetch, CATALOG_REVALIDATE } from "@/lib/shopify";
 import { canonicalFor } from "@/lib/site-url";
 import CollectionBrowse from "../collection-browse";
@@ -85,8 +82,6 @@ export default async function CollectionPage({
   if (!meta) notFound();
 
   // Empty collections (e.g. nike) still render; membership may be empty.
-  await getCatalogSnapshot();
-
   let result: Awaited<ReturnType<typeof queryCatalog>>;
   try {
     result = await queryCatalog({

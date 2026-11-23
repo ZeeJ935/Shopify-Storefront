@@ -1,16 +1,15 @@
 /**
+ * TODO(remove after catalog migration verified): the catalog now comes from the
+ * backend (lib/catalog-source.ts); this snapshot is only the fallback.
+ *
  * Full-catalog snapshot for in-app filter/sort/pagination.
  * Suitable for ~hundreds of products. If the catalog grows into the thousands,
  * move filtering to Storefront API `filters` / search instead of loading all nodes.
  */
 
 import { CATALOG_REVALIDATE, shopifyFetch } from "./shopify";
-import {
-  mapProductNode,
-  PRODUCT_CARD_FIELDS,
-  type ProductListItem,
-  type ProductNode,
-} from "./products";
+import { mapProductNode, PRODUCT_CARD_FIELDS } from "./catalog-shared/product-map";
+import type { ProductListItem, ProductNode } from "./catalog-shared/types";
 
 export type CatalogSnapshot = {
   products: ProductListItem[];
@@ -176,28 +175,9 @@ export async function getCatalogSnapshot(): Promise<CatalogSnapshot> {
   return snapshotPromise;
 }
 
-export function productSizeValues(product: ProductListItem): string[] {
-  const sizes = new Set<string>();
-  for (const v of product.variants) {
-    for (const o of v.selectedOptions) {
-      if (o.name.toLowerCase() === "size") sizes.add(o.value);
-    }
-  }
-  return [...sizes];
-}
-
-export function productIsOnSale(product: ProductListItem): boolean {
-  if (!product.compareAtPrice) return false;
-  return (
-    Number(product.compareAtPrice.amount) >
-    Number(product.priceRange.minVariantPrice.amount)
-  );
-}
-
-export function productIsAvailable(product: ProductListItem): boolean {
-  return product.availableForSale;
-}
-
-export function productMinPrice(product: ProductListItem): number {
-  return Number(product.priceRange.minVariantPrice.amount);
-}
+export {
+  productIsAvailable,
+  productIsOnSale,
+  productMinPrice,
+  productSizeValues,
+} from "./catalog-shared/catalog-rules";

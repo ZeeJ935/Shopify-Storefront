@@ -9,6 +9,7 @@ Next.js App Router storefront for a Shopify shop (Nike / Adidas demo catalog). U
 | Area | What’s included |
 |------|-----------------|
 | Catalog | Home, collections (filters/sort, infinite scroll with retry), product detail, search + predictive search |
+| Catalog data | Served from the backend's Postgres (`/v1/catalog`, synced by Shopify webhooks plus a nightly full sync); filters, sorting, facets and paging run in SQL with the same results as before. If the backend is off, down or not yet synced, the old in-memory snapshot answers instead (`lib/catalog-source.ts`) |
 | Cart | Cookie cart, slide-out drawer, instant (optimistic) quantity changes batched into one request, discounts, Shopify hosted checkout |
 | Stock | Quantity limited to available stock, “Only N left”, sold-out and backorder states; Shopify’s stock warnings shown on cart lines |
 | Account | Login/signup via Shopify, overview, orders (newer/older paging), addresses CRUD with country list, profile |

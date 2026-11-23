@@ -1,4 +1,9 @@
 import { buildApp } from "./app.js";
+import { createCatalogHandler } from "./catalog/handlers.js";
+import { createCatalogJobs } from "./catalog/jobs.js";
+import { createCatalogStore } from "./catalog/store.js";
+import { createStorefrontSource } from "./catalog/storefront.js";
+import { fullSync } from "./catalog/sync.js";
 import { createDb } from "./db/client.js";
 import { createWebhookIntake, createWebhookStore } from "./db/webhooks.js";
 import { readEnv } from "./env.js";
@@ -12,19 +17,42 @@ const queue = createWebhookQueue(env.databaseUrl);
 if (!env.shopifyWebhookSecret) console.warn("[webhooks] SHOPIFY_WEBHOOK_SECRET is not set: webhooks will get 500");
 if (!env.storefrontUrl) console.warn("[webhooks] STOREFRONT_URL is not set: catalog webhooks will fail and retry");
 
+const revalidate = createRevalidator(env.storefrontUrl, env.serviceToken);
+const catalogStore = createCatalogStore(db.pool);
+const source =
+  env.shopifyStoreDomain && env.shopifyStorefrontToken
+    ? createStorefrontSource({ storeDomain: env.shopifyStoreDomain, token: env.shopifyStorefrontToken })
+    : null;
+if (!source) console.warn("[catalog] SHOPIFY_STORE_DOMAIN / SHOPIFY_STOREFRONT_ACCESS_TOKEN not set: catalog sync is off");
+
+await queue.init();
+const catalogJobs = createCatalogJobs(queue.boss);
+
 const app = buildApp({
   serviceToken: env.serviceToken,
   customers: db.customers,
   favourites: db.favourites,
   pingDb: db.ping,
   webhooks: { secret: env.shopifyWebhookSecret, intake: createWebhookIntake(db.pool, queue.enqueueOnClient) },
+  catalog: { pool: db.pool, enqueueFullSync: source ? catalogJobs.enqueueFullSync : undefined },
   logger: { level: process.env.LOG_LEVEL ?? "info" },
 });
 
-const store = createWebhookStore(db.pool);
-const revalidate = createRevalidator(env.storefrontUrl, env.serviceToken);
+if (source) {
+  const deps = { source, store: catalogStore };
+  await catalogJobs.start(async (reason) => {
+    const result = await fullSync(deps);
+    app.log.info({ reason, ...result }, "catalog full sync finished");
+    await revalidate();
+  });
+  // First deploy: fill the catalog straight away instead of waiting for the night.
+  if ((await catalogStore.count()) === 0) await catalogJobs.enqueueFullSync("initial");
+}
+
+const webhookStore = createWebhookStore(db.pool);
+const catalog = source ? createCatalogHandler({ source, store: catalogStore, scheduleFullSync: catalogJobs.scheduleFullSync }) : undefined;
 await queue.start(async (eventId) => {
-  const result = await processWebhookEvent(eventId, { store, revalidate });
+  const result = await processWebhookEvent(eventId, { store: webhookStore, revalidate, catalog });
   if (result === "failed") app.log.error({ eventId }, "webhook failed after the last attempt");
 });
 

@@ -77,7 +77,7 @@ export function fakeWebhooks() {
       const row = rows.find((r) => r.id === id);
       if (!row || row.processedAt || row.failedAt) return null;
       row.attempts++;
-      return { topic: row.topic, attempts: row.attempts };
+      return { topic: row.topic, attempts: row.attempts, payload: row.payload };
     },
     async markProcessed(id) {
       const row = rows.find((r) => r.id === id)!;

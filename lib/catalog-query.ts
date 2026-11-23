@@ -1,45 +1,41 @@
+import type { CatalogSnapshot } from "./catalog-snapshot";
 import {
-  getCatalogSnapshot,
+  compareSizes,
   productIsAvailable,
   productIsOnSale,
   productMinPrice,
   productSizeValues,
-} from "./catalog-snapshot";
+} from "./catalog-shared/catalog-rules";
 import {
   genderTagsFromProduct,
   primaryColorTag,
-} from "./tag-classify";
-import type { ProductListItem } from "./products";
+} from "./catalog-shared/tag-classify";
+import type {
+  CatalogFilters,
+  CatalogRaw,
+  CatalogSort,
+  FacetValue,
+  ProductListItem,
+} from "./catalog-shared/types";
 import { preferredBrands } from "./site-content";
+
+export type { CatalogFilters, CatalogSort, FacetValue } from "./catalog-shared/types";
 
 export const PAGE_SIZE = 24;
 
-export type CatalogSort =
-  | "featured"
-  | "latest"
-  | "price-asc"
-  | "price-desc"
-  | "name-asc"
-  | "name-desc"
-  | "best-selling";
-
-export type CatalogFilters = {
-  brand: string[];
-  type: string[];
-  gender: string[];
-  size: string[];
-  color: string[];
-  sale: boolean | null;
-  available: boolean | null;
-  priceMin: number | null;
-  priceMax: number | null;
-};
-
-export type FacetValue = {
-  value: string;
-  label: string;
-  count: number;
-};
+/** Collections whose membership the catalog knows (same list as the snapshot and the backend). */
+export const TRACKED_COLLECTIONS = [
+  "men",
+  "women",
+  "kids",
+  "nike",
+  "adidas",
+  "sale",
+  "trending",
+  "shoes",
+  "clothing",
+  "accessories",
+] as const;
 
 export type FacetGroup = {
   id: string;
@@ -60,19 +56,12 @@ export type CatalogQueryResult = {
   hideGenderFacet: boolean;
 };
 
-const SIZE_ALPHA = [
-  "XXS",
-  "XS",
-  "S",
-  "M",
-  "L",
-  "XL",
-  "2XL",
-  "XXL",
-  "3XL",
-  "XXXL",
-  "4XL",
-];
+export type CatalogQueryOptions = {
+  scope?: string | null;
+  filters: CatalogFilters;
+  sort: CatalogSort;
+  page?: number;
+};
 
 export function parseCatalogParams(
   params: URLSearchParams,
@@ -255,20 +244,6 @@ function sortProducts(
   }
 }
 
-function compareSizes(a: string, b: string): number {
-  const ua = a.toUpperCase();
-  const ub = b.toUpperCase();
-  const ia = SIZE_ALPHA.indexOf(ua);
-  const ib = SIZE_ALPHA.indexOf(ub);
-  if (ia !== -1 && ib !== -1) return ia - ib;
-  if (ia !== -1) return -1;
-  if (ib !== -1) return 1;
-  const na = parseFloat(a);
-  const nb = parseFloat(b);
-  if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
-}
-
 function countFacet(
   products: ProductListItem[],
   getKeys: (p: ProductListItem) => string[],
@@ -309,13 +284,24 @@ function applyExcept(
   return products.filter((p) => matchesFilters(p, partial));
 }
 
-export async function queryCatalog(options: {
-  scope?: string | null;
-  filters: CatalogFilters;
-  sort: CatalogSort;
-  page?: number;
-}): Promise<CatalogQueryResult> {
-  const snapshot = await getCatalogSnapshot();
+const brandKeys = (p: ProductListItem) => [p.vendor];
+const typeKeys = (p: ProductListItem) => (p.productType ? [p.productType] : []);
+const genderKeys = (p: ProductListItem) => genderTagsFromProduct(p.tags);
+const sizeKeys = (p: ProductListItem) => productSizeValues(p);
+const colorKeys = (p: ProductListItem) => {
+  const c = primaryColorTag(p.tags);
+  return c ? [c] : [];
+};
+
+/**
+ * The catalog's data for one query, computed in memory from the snapshot.
+ * TODO(remove after catalog migration verified): the backend's SQL now produces
+ * the same CatalogRaw; this stays as the fallback and as the parity reference.
+ */
+export function rawFromSnapshot(
+  snapshot: CatalogSnapshot,
+  options: CatalogQueryOptions,
+): CatalogRaw {
   const scope = options.scope && options.scope !== "all" ? options.scope : null;
 
   let base = snapshot.products;
@@ -326,9 +312,6 @@ export async function queryCatalog(options: {
     collectionOrder = [...set];
     base = snapshot.products.filter((p) => set.has(p.id));
   }
-
-  const hideGenderFacet =
-    scope === "men" || scope === "women" || scope === "kids";
 
   const priceBounds = (() => {
     if (base.length === 0) return { min: 0, max: 0 };
@@ -350,17 +333,49 @@ export async function queryCatalog(options: {
   const page = Math.max(1, options.page ?? 1);
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const start = (page - 1) * PAGE_SIZE;
-  const products = sorted.slice(start, start + PAGE_SIZE);
 
-  const forBrand = applyExcept(base, options.filters, ["brand"]);
-  const forType = applyExcept(base, options.filters, ["type"]);
-  const forGender = applyExcept(base, options.filters, ["gender"]);
-  const forSize = applyExcept(base, options.filters, ["size"]);
-  const forColor = applyExcept(base, options.filters, ["color"]);
   const forSale = applyExcept(base, options.filters, ["sale"]);
   const forAvail = applyExcept(base, options.filters, ["available"]);
 
-  const brandValues = countFacet(forBrand, (p) => [p.vendor]).sort((a, b) => {
+  return {
+    products: sorted.slice(start, start + PAGE_SIZE),
+    total: sorted.length,
+    page,
+    pageCount,
+    hasNextPage: page < pageCount,
+    priceBounds,
+    hasBestSelling: snapshot.bestSellingOrder.length > 0,
+    facets: {
+      brand: countFacet(applyExcept(base, options.filters, ["brand"]), brandKeys),
+      type: countFacet(applyExcept(base, options.filters, ["type"]), typeKeys),
+      gender: countFacet(applyExcept(base, options.filters, ["gender"]), genderKeys),
+      size: countFacet(applyExcept(base, options.filters, ["size"]), sizeKeys),
+      color: countFacet(applyExcept(base, options.filters, ["color"]), colorKeys),
+      saleCount: forSale.filter(productIsOnSale).length,
+      saleBase: forSale.length,
+      inStock: forAvail.filter(productIsAvailable).length,
+      outOfStock: forAvail.filter((p) => !productIsAvailable(p)).length,
+    },
+    baseDistinct: {
+      brand: countFacet(base, brandKeys).length,
+      type: countFacet(base, typeKeys).length,
+      gender: countFacet(base, genderKeys).length,
+      size: countFacet(base, sizeKeys).length,
+      color: countFacet(base, colorKeys).length,
+    },
+  };
+}
+
+/** Turns catalog data (from the snapshot or the backend) into what the UI shows. */
+export function assembleResult(
+  raw: CatalogRaw,
+  options: Pick<CatalogQueryOptions, "scope" | "sort">,
+): CatalogQueryResult {
+  const scope = options.scope && options.scope !== "all" ? options.scope : null;
+  const hideGenderFacet =
+    scope === "men" || scope === "women" || scope === "kids";
+
+  const brandValues = [...raw.facets.brand].sort((a, b) => {
     const pa = preferredBrands.findIndex((x) => eqi(x, a.value));
     const pb = preferredBrands.findIndex((x) => eqi(x, b.value));
     if (pa !== -1 || pb !== -1) {
@@ -369,13 +384,9 @@ export async function queryCatalog(options: {
     return a.label.localeCompare(b.label);
   });
 
-  const typeValues = countFacet(forType, (p) =>
-    p.productType ? [p.productType] : [],
-  ).sort((a, b) => a.label.localeCompare(b.label));
+  const typeValues = [...raw.facets.type].sort((a, b) => a.label.localeCompare(b.label));
 
-  const genderValues = countFacet(forGender, (p) =>
-    genderTagsFromProduct(p.tags),
-  ).sort((a, b) => {
+  const genderValues = [...raw.facets.gender].sort((a, b) => {
     const order = ["Men", "Women", "Kids", "Unisex"];
     return (
       order.findIndex((x) => eqi(x, a.value)) -
@@ -383,67 +394,45 @@ export async function queryCatalog(options: {
     );
   });
 
-  const sizeValues = countFacet(forSize, (p) => productSizeValues(p)).sort(
-    (a, b) => compareSizes(a.value, b.value),
-  );
+  const sizeValues = [...raw.facets.size].sort((a, b) => compareSizes(a.value, b.value));
 
-  const colorValues = countFacet(forColor, (p) => {
-    const c = primaryColorTag(p.tags);
-    return c ? [c] : [];
-  }).sort((a, b) => a.label.localeCompare(b.label));
+  const colorValues = [...raw.facets.color].sort((a, b) => a.label.localeCompare(b.label));
 
-  const onSaleCount = forSale.filter(productIsOnSale).length;
-  const inStockCount = forAvail.filter(productIsAvailable).length;
-  const oosCount = forAvail.filter((p) => !productIsAvailable(p)).length;
+  const { saleCount, saleBase, inStock, outOfStock } = raw.facets;
 
   // Show facet only when the base scope has more than one possible value.
   const facetsClean: FacetGroup[] = [];
-  const brandInBase = countFacet(base, (p) => [p.vendor]);
-  if (brandInBase.length > 1 && brandValues.length > 0) {
+  if (raw.baseDistinct.brand > 1 && brandValues.length > 0) {
     facetsClean.push({ id: "brand", label: "Brand", values: brandValues });
   }
-
-  const typeInBase = countFacet(base, (p) =>
-    p.productType ? [p.productType] : [],
-  );
-  if (typeInBase.length > 1 && typeValues.length > 0) {
+  if (raw.baseDistinct.type > 1 && typeValues.length > 0) {
     facetsClean.push({ id: "type", label: "Category", values: typeValues });
   }
-
-  if (!hideGenderFacet) {
-    const genderInBase = countFacet(base, (p) => genderTagsFromProduct(p.tags));
-    if (genderInBase.length > 1 && genderValues.length > 0) {
-      facetsClean.push({ id: "gender", label: "Gender", values: genderValues });
-    }
+  if (!hideGenderFacet && raw.baseDistinct.gender > 1 && genderValues.length > 0) {
+    facetsClean.push({ id: "gender", label: "Gender", values: genderValues });
   }
-
-  const sizeInBase = countFacet(base, (p) => productSizeValues(p));
-  if (sizeInBase.length > 1 && sizeValues.length > 0) {
+  if (raw.baseDistinct.size > 1 && sizeValues.length > 0) {
     facetsClean.push({ id: "size", label: "Size", values: sizeValues });
   }
-
-  const colorInBase = countFacet(base, (p) => {
-    const c = primaryColorTag(p.tags);
-    return c ? [c] : [];
-  });
-  if (colorInBase.length > 1 && colorValues.length > 0) {
+  if (raw.baseDistinct.color > 1 && colorValues.length > 0) {
     facetsClean.push({ id: "color", label: "Color", values: colorValues });
   }
 
-  if (onSaleCount > 0 && forSale.some((p) => !productIsOnSale(p))) {
+  // Shown when some products are on sale and some aren't.
+  if (saleCount > 0 && saleBase > saleCount) {
     facetsClean.push({
       id: "sale",
       label: "On sale",
-      values: [{ value: "1", label: "On sale", count: onSaleCount }],
+      values: [{ value: "1", label: "On sale", count: saleCount }],
     });
   }
 
   const availValues: FacetValue[] = [];
-  if (inStockCount > 0) {
-    availValues.push({ value: "1", label: "In stock", count: inStockCount });
+  if (inStock > 0) {
+    availValues.push({ value: "1", label: "In stock", count: inStock });
   }
-  if (oosCount > 0) {
-    availValues.push({ value: "0", label: "Out of stock", count: oosCount });
+  if (outOfStock > 0) {
+    availValues.push({ value: "0", label: "Out of stock", count: outOfStock });
   }
   if (availValues.length > 1) {
     facetsClean.push({
@@ -453,7 +442,6 @@ export async function queryCatalog(options: {
     });
   }
 
-  const hasBestSelling = snapshot.bestSellingOrder.length > 0;
   const sortOptions: { value: CatalogSort; label: string }[] = [
     { value: "featured", label: "Featured" },
     { value: "latest", label: "Latest" },
@@ -462,18 +450,18 @@ export async function queryCatalog(options: {
     { value: "name-asc", label: "Name: A–Z" },
     { value: "name-desc", label: "Name: Z–A" },
   ];
-  if (hasBestSelling) {
+  if (raw.hasBestSelling) {
     sortOptions.push({ value: "best-selling", label: "Best selling" });
   }
 
   return {
-    products,
-    total: sorted.length,
-    page,
-    pageCount,
-    hasNextPage: page < pageCount,
+    products: raw.products,
+    total: raw.total,
+    page: raw.page,
+    pageCount: raw.pageCount,
+    hasNextPage: raw.hasNextPage,
     facets: facetsClean,
-    priceBounds,
+    priceBounds: raw.priceBounds,
     sort: options.sort,
     sortOptions,
     hideGenderFacet,

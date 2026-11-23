@@ -24,6 +24,10 @@ The token is checked first, so a caller without it learns nothing about the othe
 | GET | `/v1/favourites` | token + customer ID | `{ ids, imported }`. `imported: false` means the Shopify metafield hasn't been imported yet |
 | PUT | `/v1/favourites` | token + customer ID | Body `{ ids }`: replaces the whole list. Duplicates are collapsed; more than 200 → `400 too_many_favourites` |
 | POST | `/v1/favourites/import` | token + customer ID | Body `{ ids }`: one-time import from the metafield. A repeat call changes nothing (`imported: false`); more than 200 is trimmed |
+| GET | `/v1/catalog` | token | Catalog query: `scope`, `brand`, `type`, `gender`, `size`, `color`, `sale`, `available`, `price_min`, `price_max`, `sort`, `page` or `cursor`, `limit` (≤100), `q`. Products, totals, facet counts, `nextCursor`; `empty: true` if nothing is synced yet |
+| GET | `/v1/products/by-ids` | token | `?ids=a,b` (≤250): products in the order asked, unknown IDs skipped |
+| GET | `/v1/catalog/overview` | token | Light product list in catalog order (handle, brand, image, dates) for the nav and sitemap |
+| POST | `/v1/catalog/sync` | token | Queues a full catalog sync; `202` (`503` if Storefront access isn't configured) |
 | POST | `/webhooks/shopify` | Shopify HMAC (no service token) | Records the event, drops duplicates, answers `200` at once; catalog topics are processed by the queue (see below) |
 
 **Favourites data:** the `favourites` table holds `(customer_id, product_id, created_at)`, unique per customer and product, in the order they were added. `customers.favourites_imported_at` records when a customer's list moved to Postgres, so an emptied list is never re-imported.
@@ -41,6 +45,8 @@ Names only. Copy `.env.example` to `.env`.
 | `LOG_LEVEL` | Optional; default `info` |
 | `SHOPIFY_WEBHOOK_SECRET` | Shopify's webhook signing secret (Shopify admin → Settings → Notifications → Webhooks). Without it, webhooks get `500` so Shopify retries later |
 | `STOREFRONT_URL` | Storefront origin, for clearing its cache (`POST /api/revalidate`). Without it, catalog webhooks fail and retry |
+| `SHOPIFY_STORE_DOMAIN` | Storefront API domain for catalog sync (same as the storefront's). Without it and the token below, catalog sync is off |
+| `SHOPIFY_STOREFRONT_ACCESS_TOKEN` | Storefront API token for catalog sync (same as the storefront's) |
 
 ## Run locally
 
@@ -105,12 +111,28 @@ curl -i -X POST http://127.0.0.1:4000/webhooks/shopify \
 
 **Free plan:** the API sleeps after 15 minutes idle and takes about a minute to wake. Shopify waits only a few seconds, so a webhook that arrives while it sleeps times out and Shopify retries it later (the 2-minute cache refresh still applies meanwhile). If deliveries keep failing for a long time, Shopify can remove the webhook; an always-on plan avoids this.
 
+## Product catalog
+
+Products live in Postgres (`products`, `product_collections`, `catalog_state`) and are served to the storefront by `GET /v1/catalog`, which filters, sorts, pages and counts facets in SQL with the same results as the storefront's old in-memory catalog (checked by `test/catalog.db.test.ts` against `test/fixtures/catalog-parity.json`).
+
+**Kept in sync by:**
+- **Product webhooks.** `products/create` and `products/update` re-fetch that product from the Storefront API and upsert it; a product Shopify no longer shows is removed. Only the product ID is read from the payload. `products/delete` removes it.
+- **Collection webhooks.** Membership of the tracked collections (`men`, `women`, `kids`, `nike`, `adidas`, `sale`, `trending`, `shoes`, `clothing`, `accessories`) is re-read.
+- **Inventory webhooks.** They can't name a product, so they schedule a full sync, at most one per minute.
+- **A nightly full sync** (03:00 UTC, pg-boss). If the service was asleep at that time, it runs once on wake. It re-reads everything and deletes products no longer in Shopify, but only after the whole catalog was read successfully.
+
+After every sync the storefront's cache is cleared (`POST {STOREFRONT_URL}/api/revalidate`).
+
+**Backfill:** on first start with an empty `products` table, a full sync is queued automatically. To run one by hand: `npm run catalog:backfill` (local), `npm run catalog:backfill:prod` (compiled, e.g. a Render shell), or `POST /v1/catalog/sync`. It's safe to run any number of times.
+
+**Shared code:** `src/catalog-shared/` is an exact copy of the storefront's `lib/catalog-shared/` (product normalization and filter rules). After changing those files, run `npm run sync:shared`; a test fails if the copies differ.
+
 ## Deploy on Render
 
 `render.yaml` (repo root) defines the API and its Postgres.
 
 1. Render dashboard → **New → Blueprint** → pick this repository. Render creates `zj-backend-db` (Postgres) and `zj-backend` (the API). Before each deploy it runs the migrations (`npm run db:migrate:prod`).
-2. Open the `zj-backend` service, copy its URL (`https://….onrender.com`) and the generated `BACKEND_SERVICE_TOKEN` (Environment tab). Fill in `SHOPIFY_WEBHOOK_SECRET` and `STOREFRONT_URL` there too.
+2. Open the `zj-backend` service, copy its URL (`https://….onrender.com`) and the generated `BACKEND_SERVICE_TOKEN` (Environment tab). Fill in `SHOPIFY_WEBHOOK_SECRET`, `STOREFRONT_URL`, `SHOPIFY_STORE_DOMAIN` and `SHOPIFY_STOREFRONT_ACCESS_TOKEN` there too.
 3. In Vercel → Project → Settings → Environment Variables, set `BACKEND_URL` and `BACKEND_SERVICE_TOKEN` for Production, then redeploy.
 4. Check `https://<your-api>.onrender.com/health` returns `{"ok":true,"db":"up"}`.
 

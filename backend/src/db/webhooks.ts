@@ -20,7 +20,7 @@ export type EnqueueOnClient = (client: pg.PoolClient, eventId: number) => Promis
 /** What processing needs from the database. Tests pass a fake. */
 export type WebhookStore = {
   /** Counts an attempt. Null when the event is missing, already processed, or already failed. */
-  beginAttempt(id: number): Promise<{ topic: string; attempts: number } | null>;
+  beginAttempt(id: number): Promise<{ topic: string; attempts: number; payload: unknown } | null>;
   markProcessed(id: number): Promise<void>;
   /** Keeps the error; `final` also marks the event failed. */
   markError(id: number, error: string, final: boolean): Promise<void>;
@@ -59,10 +59,10 @@ export function createWebhookIntake(pool: pg.Pool, enqueue: EnqueueOnClient): We
 export function createWebhookStore(pool: pg.Pool): WebhookStore {
   return {
     async beginAttempt(id) {
-      const { rows } = await pool.query<{ topic: string; attempts: number }>(
+      const { rows } = await pool.query<{ topic: string; attempts: number; payload: unknown }>(
         `update webhook_events set attempts = attempts + 1
          where id = $1 and processed_at is null and failed_at is null
-         returning topic, attempts`,
+         returning topic, attempts, payload`,
         [id],
       );
       return rows[0] ?? null;

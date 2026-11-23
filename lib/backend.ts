@@ -1,6 +1,7 @@
 import "server-only";
 import { getCustomerId } from "@/lib/customer-account/session";
 import { pickFavouritesStore } from "@/lib/favourites-store";
+import type { CatalogRaw, ProductListItem } from "@/lib/catalog-shared/types";
 
 // Server-side client for the /backend service. The browser never calls the
 // backend: only this server holds BACKEND_SERVICE_TOKEN, and it tells the
@@ -77,4 +78,20 @@ export async function putBackendFavourites(customerId: string, ids: string[]) {
 
 export function importBackendFavourites(customerId: string, ids: string[]) {
   return backendFetch<BackendFavourites>("/v1/favourites/import", { customerId, method: "POST", body: { ids } });
+}
+
+export type BackendCatalog = CatalogRaw & { nextCursor: string | null; empty: boolean };
+
+/** GET /v1/catalog with the storefront's own query parameters (scope, filters, sort, page). */
+export function getBackendCatalog(params: URLSearchParams) {
+  return backendFetch<BackendCatalog>(`/v1/catalog?${params.toString()}`);
+}
+
+export type BackendOverviewProduct = Pick<ProductListItem, "handle" | "vendor" | "createdAt" | "featuredImage" | "images"> & {
+  updatedAt: string | null;
+};
+
+/** Light product list in catalog order, for the nav and the sitemap. */
+export function getBackendCatalogOverview() {
+  return backendFetch<{ products: BackendOverviewProduct[]; empty: boolean }>("/v1/catalog/overview");
 }

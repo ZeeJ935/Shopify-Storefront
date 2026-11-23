@@ -2,10 +2,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import SiteContainer from "@/app/components/site-container";
 import { canonicalFor } from "@/lib/site-url";
-import {
-  parseCatalogParams,
-  queryCatalog,
-} from "@/lib/catalog-query";
+import { parseCatalogParams } from "@/lib/catalog-query";
+import { queryCatalog } from "@/lib/catalog-source";
 import CollectionBrowse from "../collection-browse";
 
 

@@ -1,6 +1,6 @@
 import { cacheLife, cacheTag } from "next/cache";
 import { CATALOG_REVALIDATE, CATALOG_TAG, shopifyFetch } from "./shopify";
-import { getCatalogSnapshot } from "./catalog-snapshot";
+import { getCatalogProductList } from "./catalog-source";
 import {
   preferredBrands,
   primaryNavIntents,
@@ -294,10 +294,10 @@ export async function getNavCatalog(): Promise<NavCatalog> {
   cacheTag(CATALOG_TAG);
 
   try {
-    const [collections, typeProbe, snapshot] = await Promise.all([
+    const [collections, typeProbe, catalogProducts] = await Promise.all([
       probeCollections(),
       probeProductTypes(),
-      getCatalogSnapshot(),
+      getCatalogProductList(),
     ]);
 
     const populated = new Map<string, NonNullable<CollectionProbe>>();
@@ -339,7 +339,7 @@ export async function getNavCatalog(): Promise<NavCatalog> {
       string,
       { image: CatalogImage | null; createdAt: string }
     >();
-    for (const p of snapshot.products) {
+    for (const p of catalogProducts) {
       const key = p.vendor.trim().toLowerCase();
       if (!key) continue;
       const created = p.createdAt ?? "";
@@ -369,7 +369,7 @@ export async function getNavCatalog(): Promise<NavCatalog> {
     for (const [key, info] of newestByVendor) {
       if (seen.has(key)) continue;
       const label =
-        snapshot.products.find((p) => p.vendor.toLowerCase() === key)?.vendor ??
+        catalogProducts.find((p) => p.vendor.toLowerCase() === key)?.vendor ??
         key;
       brandTiles.push({
         label,

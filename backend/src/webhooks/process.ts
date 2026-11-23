@@ -5,6 +5,8 @@ export type ProcessDeps = {
   store: WebhookStore;
   /** Tells Next.js to clear its catalog cache. Throws when that fails. */
   revalidate: () => Promise<void>;
+  /** Updates the Postgres catalog for a catalog topic (absent when the catalog isn't configured). */
+  catalog?: (topic: string, payload: unknown) => Promise<void>;
   maxAttempts?: number;
 };
 
@@ -20,7 +22,11 @@ export async function processWebhookEvent(id: number, deps: ProcessDeps): Promis
   if (!event) return "skipped"; // already processed or failed (for example a redelivered job)
 
   try {
-    if (CATALOG_TOPICS.has(event.topic)) await deps.revalidate();
+    if (CATALOG_TOPICS.has(event.topic)) {
+      // Update our catalog first, then clear the storefront cache so it reads the new data.
+      if (deps.catalog) await deps.catalog(event.topic, event.payload);
+      await deps.revalidate();
+    }
     await deps.store.markProcessed(id);
     return "processed";
   } catch (error) {

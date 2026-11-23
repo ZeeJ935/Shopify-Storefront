@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  parseCatalogParams,
-  queryCatalog,
-} from "@/lib/catalog-query";
+import { parseCatalogParams } from "@/lib/catalog-query";
+import { queryCatalog } from "@/lib/catalog-source";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
