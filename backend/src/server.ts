@@ -1,3 +1,4 @@
+import "./instrument.js"; // first: Sentry must load before anything else
 import { buildApp } from "./app.js";
 import { createCatalogHandler } from "./catalog/handlers.js";
 import { createCatalogJobs } from "./catalog/jobs.js";
@@ -9,8 +10,10 @@ import { createWebhookIntake, createWebhookStore } from "./db/webhooks.js";
 import { readEnv } from "./env.js";
 import { createWebhookQueue } from "./queue.js";
 import { createRevalidator, processWebhookEvent } from "./webhooks/process.js";
+import { createReporter } from "./report.js";
 
 const env = readEnv();
+const report = createReporter();
 const db = createDb(env.databaseUrl);
 const queue = createWebhookQueue(env.databaseUrl);
 
@@ -26,13 +29,16 @@ const source =
 if (!source) console.warn("[catalog] SHOPIFY_STORE_DOMAIN / SHOPIFY_STOREFRONT_ACCESS_TOKEN not set: catalog sync is off");
 
 await queue.init();
-const catalogJobs = createCatalogJobs(queue.boss);
+const catalogJobs = createCatalogJobs(queue.boss, report);
 
 const app = buildApp({
   serviceToken: env.serviceToken,
   customers: db.customers,
   favourites: db.favourites,
   pingDb: db.ping,
+  healthDetails: db.healthDetails,
+  report,
+  debugRoutes: true,
   webhooks: { secret: env.shopifyWebhookSecret, intake: createWebhookIntake(db.pool, queue.enqueueOnClient) },
   catalog: { pool: db.pool, enqueueFullSync: source ? catalogJobs.enqueueFullSync : undefined },
   logger: { level: process.env.LOG_LEVEL ?? "info" },
@@ -52,8 +58,13 @@ if (source) {
 const webhookStore = createWebhookStore(db.pool);
 const catalog = source ? createCatalogHandler({ source, store: catalogStore, scheduleFullSync: catalogJobs.scheduleFullSync }) : undefined;
 await queue.start(async (eventId) => {
-  const result = await processWebhookEvent(eventId, { store: webhookStore, revalidate, catalog });
-  if (result === "failed") app.log.error({ eventId }, "webhook failed after the last attempt");
+  await processWebhookEvent(eventId, {
+    store: webhookStore,
+    revalidate,
+    catalog,
+    onFinalFailure: ({ eventId: id, topic }, error) =>
+      report(error, { kind: "webhook", topic, event_id: String(id) }),
+  });
 });
 
 const shutdown = async () => {

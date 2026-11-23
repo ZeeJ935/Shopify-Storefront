@@ -33,28 +33,14 @@ export default async function AllProductsPage({ searchParams }: PageProps) {
   const sp = toURLSearchParams(await searchParams);
   const { filters, sort, page } = parseCatalogParams(sp);
 
-  let result: Awaited<ReturnType<typeof queryCatalog>>;
-  try {
-    result = await queryCatalog({
-      scope: null,
-      filters,
-      sort,
-      page: 1, // SSR always seeds page 1; client loads more
-    });
-  } catch {
-    result = {
-      products: [],
-      total: 0,
-      page: 1,
-      pageCount: 1,
-      hasNextPage: false,
-      facets: [],
-      priceBounds: { min: 0, max: 0 },
-      sort,
-      sortOptions: [],
-      hideGenderFacet: false,
-    };
-  }
+  // If the catalog can't load, app/collections/error.tsx shows a retry state
+  // instead of an empty catalog.
+  const result = await queryCatalog({
+    scope: null,
+    filters,
+    sort,
+    page: 1, // SSR always seeds page 1; client loads more
+  });
 
   void page;
 

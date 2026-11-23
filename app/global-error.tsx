@@ -2,6 +2,8 @@
 
 // Replaces the root layout when it fails, so it brings its own document and styles.
 import Link from "next/link";
+import { useEffect } from "react";
+import { reportClientError } from "@/lib/report-client-error";
 import "./globals.css";
 
 export default function GlobalError({
@@ -11,6 +13,10 @@ export default function GlobalError({
   error: unknown;
   retry: () => void;
 }) {
+  useEffect(() => {
+    reportClientError(error, "global-error");
+  }, [error]);
+
   const digest =
     error instanceof Error && "digest" in error
       ? String((error as Error & { digest?: string }).digest ?? "")

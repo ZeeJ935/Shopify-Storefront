@@ -19,7 +19,7 @@ The token is checked first, so a caller without it learns nothing about the othe
 
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
-| GET | `/health` | none | `{ ok, db: "up" \| "down" }`; `503` when the database is down |
+| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, webhooks: { failedLast24h } }`. `503` only when the database is down; a stale sync (none in 26 h) or failed webhooks are fields, not a failure |
 | GET | `/v1/me` | token + customer ID | `{ customerId, firstSeenAt }`; records the customer (insert, or update `last_seen_at`) |
 | GET | `/v1/favourites` | token + customer ID | `{ ids, imported }`. `imported: false` means the Shopify metafield hasn't been imported yet |
 | PUT | `/v1/favourites` | token + customer ID | Body `{ ids }`: replaces the whole list. Duplicates are collapsed; more than 200 → `400 too_many_favourites` |
@@ -27,6 +27,7 @@ The token is checked first, so a caller without it learns nothing about the othe
 | GET | `/v1/catalog` | token | Catalog query: `scope`, `brand`, `type`, `gender`, `size`, `color`, `sale`, `available`, `price_min`, `price_max`, `sort`, `page` or `cursor`, `limit` (≤100), `q`. Products, totals, facet counts, `nextCursor`; `empty: true` if nothing is synced yet |
 | GET | `/v1/products/by-ids` | token | `?ids=a,b` (≤250): products in the order asked, unknown IDs skipped |
 | GET | `/v1/catalog/overview` | token | Light product list in catalog order (handle, brand, image, dates) for the nav and sitemap |
+| GET | `/v1/debug/sentry` | token | Throws on purpose, to test error reporting (see below) |
 | POST | `/v1/catalog/sync` | token | Queues a full catalog sync; `202` (`503` if Storefront access isn't configured) |
 | POST | `/webhooks/shopify` | Shopify HMAC (no service token) | Records the event, drops duplicates, answers `200` at once; catalog topics are processed by the queue (see below) |
 
@@ -47,6 +48,8 @@ Names only. Copy `.env.example` to `.env`.
 | `STOREFRONT_URL` | Storefront origin, for clearing its cache (`POST /api/revalidate`). Without it, catalog webhooks fail and retry |
 | `SHOPIFY_STORE_DOMAIN` | Storefront API domain for catalog sync (same as the storefront's). Without it and the token below, catalog sync is off |
 | `SHOPIFY_STOREFRONT_ACCESS_TOKEN` | Storefront API token for catalog sync (same as the storefront's) |
+| `SENTRY_DSN` | Optional. Sentry project DSN; without it error reporting is off and nothing else changes |
+| `SENTRY_ENVIRONMENT` | Optional. Environment name shown in Sentry (default: `NODE_ENV`) |
 
 ## Run locally
 
@@ -111,9 +114,11 @@ curl -i -X POST http://127.0.0.1:4000/webhooks/shopify \
 
 **Free plan:** the API sleeps after 15 minutes idle and takes about a minute to wake. Shopify waits only a few seconds, so a webhook that arrives while it sleeps times out and Shopify retries it later (the 2-minute cache refresh still applies meanwhile). If deliveries keep failing for a long time, Shopify can remove the webhook; an always-on plan avoids this.
 
+**Keep-alive:** `.github/workflows/keepalive.yml` pings `/health` every 10 minutes so the free instance doesn't sleep (catalog pages depend on it). Set the repository variable `BACKEND_HEALTH_URL` (Settings → Secrets and variables → Actions → Variables) to `https://<your-api>.onrender.com/health`. Without it the workflow skips. GitHub may start scheduled runs a few minutes late.
+
 ## Product catalog
 
-Products live in Postgres (`products`, `product_collections`, `catalog_state`) and are served to the storefront by `GET /v1/catalog`, which filters, sorts, pages and counts facets in SQL with the same results as the storefront's old in-memory catalog (checked by `test/catalog.db.test.ts` against `test/fixtures/catalog-parity.json`).
+Products live in Postgres (`products`, `product_collections`, `catalog_state`) and are served to the storefront by `GET /v1/catalog`, which filters, sorts, pages and counts facets in SQL with the same results as the storefront's original in-memory catalog: `test/catalog.db.test.ts` checks the SQL against frozen reference answers in `test/fixtures/catalog-parity.json`.
 
 **Kept in sync by:**
 - **Product webhooks.** `products/create` and `products/update` re-fetch that product from the Storefront API and upsert it; a product Shopify no longer shows is removed. Only the product ID is read from the payload. `products/delete` removes it.
@@ -126,6 +131,22 @@ After every sync the storefront's cache is cleared (`POST {STOREFRONT_URL}/api/r
 **Backfill:** on first start with an empty `products` table, a full sync is queued automatically. To run one by hand: `npm run catalog:backfill` (local), `npm run catalog:backfill:prod` (compiled, e.g. a Render shell), or `POST /v1/catalog/sync`. It's safe to run any number of times.
 
 **Shared code:** `src/catalog-shared/` is an exact copy of the storefront's `lib/catalog-shared/` (product normalization and filter rules). After changing those files, run `npm run sync:shared`; a test fails if the copies differ.
+
+## Monitoring
+
+**Errors (Sentry).** With `SENTRY_DSN` set, these are reported, each tagged:
+- unexpected request errors (500s): `kind=request`, `route`
+- a webhook that failed its last retry: `kind=webhook`, `topic`, `event_id`
+- a catalog sync that failed its last attempt: `kind=job`, `job=catalog-full-sync`, `reason`
+- uncaught exceptions and unhandled promise rejections
+
+Before anything is sent, request bodies (webhook payloads), cookies, query strings, the `authorization` / `x-customer-id` / signature headers and user data are dropped, and tokens and email addresses in messages are masked (`src/sentry-scrub.ts`). Performance traces are sampled at 10%.
+
+**Test it:** `curl -H "Authorization: Bearer $BACKEND_SERVICE_TOKEN" https://<your-api>/v1/debug/sentry` returns 500 and sends a "Sentry test error" event (tagged `kind=request`). Without a DSN it's only logged.
+
+**Logs.** One JSON line per request: `reqId`, `method`, `route` (the pattern, never the URL, so no query strings), `status`, `durationMs`. Headers, bodies and webhook payloads are never logged; the service token, customer ID, signature and cookie headers are also redacted as a safety net.
+
+**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale` and `webhooks.failedLast24h` for slower problems.
 
 ## Deploy on Render
 

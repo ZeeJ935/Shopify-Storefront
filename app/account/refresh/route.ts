@@ -7,6 +7,7 @@ import {
   getCustomerSession,
 } from "@/lib/customer-account/session";
 import { safeReturnTo } from "@/lib/favourites";
+import { reportError } from "@/lib/report-error";
 
 export async function GET(request: Request) {
   await connection();
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
     applyCustomerSession(response, refreshed);
     return response;
   } catch (error) {
-    console.error("[account/refresh]", error);
+    reportError(error, { area: "account", step: "refresh" });
     const response = NextResponse.redirect(
       new URL("/account/login?error=oauth", request.url),
       302,

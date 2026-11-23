@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { NextResponse } from "next/server";
 import { completeCustomerAuthorization } from "@/lib/customer-account/oauth";
+import { reportError } from "@/lib/report-error";
 
 export async function GET(request: Request) {
   await connection();
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
       requestUrl: request.url,
     });
   } catch (err) {
-    console.error("[account/callback]", err);
+    reportError(err, { area: "account", step: "callback" });
     return NextResponse.redirect(
       new URL("/account/login?error=oauth", request.url),
       302,

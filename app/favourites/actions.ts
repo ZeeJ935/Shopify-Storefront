@@ -21,6 +21,7 @@ import {
   type LoadedFavourites,
 } from "@/lib/favourites-store";
 import { getProductsByIds, type ProductListItem } from "@/lib/products";
+import { reportError } from "@/lib/report-error";
 
 export type FavouritesStateResult = {
   authenticated: boolean;
@@ -56,7 +57,7 @@ async function readSaved(): Promise<LoadedFavourites> {
 
   const customerId = await getCustomerId();
   if (!customerId) {
-    console.error("[favourites] load failed: signed in but the session has no customer ID");
+    reportError(new Error("signed in but the session has no customer ID"), { area: "favourites", step: "load" });
     return { ids: [], loaded: false };
   }
   return loadFavourites({
@@ -68,7 +69,7 @@ async function readSaved(): Promise<LoadedFavourites> {
     readMetafield: getCustomerFavouriteIds,
     // Never logs the customer ID: backend errors carry only status and path.
     onError: (stage, error) =>
-      console.error(`[favourites] load failed (${stage}): ${describeFavouritesError(error)}`),
+      reportError(new Error(describeFavouritesError(error)), { area: "favourites", step: `load-${stage}` }),
   });
 }
 
@@ -94,7 +95,7 @@ export async function getFavouritesState(): Promise<FavouritesStateResult> {
   // Deliberately no rethrow: this runs in the background on every page, so
   // an expiring session must not redirect the shopper away mid-browse.
   const saved = await readSaved().catch((error: unknown) => {
-    console.error(`[favourites] load failed: ${describeFavouritesError(error)}`);
+    reportError(new Error(describeFavouritesError(error)), { area: "favourites", step: "load" });
     return { ids: [] as string[], loaded: false };
   });
   return { authenticated: true, ...saved };
@@ -170,11 +171,11 @@ function friendlyFavouritesError(message?: string) {
     return "Favourites aren’t set up in Shopify yet. In Admin, create a customer metafield custom.favourites (JSON) with Customer account access: Read and write.";
   }
   if (raw === "unavailable" || /Backend request failed|BACKEND_|fetch failed|aborted|timeout/i.test(raw)) {
-    console.error("[favourites] backend:", raw);
+    reportError(new Error(raw), { area: "favourites", step: "backend" });
     return UNAVAILABLE;
   }
   // Anything else is API detail: keep it in the server log, not the toast.
-  console.error("[favourites]", raw);
+  reportError(new Error(raw), { area: "favourites", step: "save" });
   return "Could not save favourites. Please try again.";
 }
 

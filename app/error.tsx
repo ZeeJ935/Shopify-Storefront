@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import SiteContainer from "@/app/components/site-container";
+import { reportClientError } from "@/lib/report-client-error";
 
 function errorDigest(error: unknown) {
   return error instanceof Error && "digest" in error
@@ -18,7 +19,7 @@ export default function Error({
   retry: () => void;
 }) {
   useEffect(() => {
-    console.error(error);
+    reportClientError(error, "error-page");
   }, [error]);
 
   const digest = errorDigest(error);

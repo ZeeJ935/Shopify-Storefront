@@ -104,8 +104,8 @@ export type FacetValue = {
 
 /**
  * The data part of a catalog query: products for the page, totals, and facet
- * counts. Produced by the old in-memory snapshot or by the backend's SQL; the
- * app turns it into the UI result (facet order and visibility, sort options).
+ * counts. Produced by the backend's SQL; the app turns it into the UI result
+ * (facet order and visibility, sort options).
  */
 export type CatalogRaw = {
   products: ProductListItem[];

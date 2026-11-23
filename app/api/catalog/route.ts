@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseCatalogParams } from "@/lib/catalog-query";
 import { queryCatalog } from "@/lib/catalog-source";
+import { reportError } from "@/lib/report-error";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
       sortOptions: result.sortOptions,
     });
   } catch (error) {
-    console.error("catalog api", error);
+    reportError(error, { area: "catalog", step: "api" });
     return NextResponse.json(
       { error: "Unable to load catalog", products: [], total: 0, page: 1 },
       { status: 500 },

@@ -11,7 +11,7 @@ export type CatalogSource = {
   product(id: string): Promise<(FetchedProduct & { collections: string[] }) | null>;
   /** One page of the whole catalog, in Shopify's default order. */
   productsPage(after: string | null): Promise<{ products: FetchedProduct[]; endCursor: string | null; hasNextPage: boolean }>;
-  /** Up to 250 product IDs in best-selling order (as the old snapshot used). */
+  /** Up to 250 product IDs in best-selling order. */
   bestSellingIds(): Promise<string[]>;
   /** All product IDs in one collection, in its order; [] when the collection doesn't exist. */
   collectionIds(handle: string): Promise<string[]>;

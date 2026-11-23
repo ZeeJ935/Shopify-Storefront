@@ -35,6 +35,14 @@ export function createDb(databaseUrl: string) {
     async ping() {
       await pool.query("select 1");
     },
+    /** For /health: when the last full catalog sync finished, and webhooks that failed in the last 24h. */
+    async healthDetails() {
+      const { rows } = await pool.query<{ last_sync: Date | null; failed: string }>(
+        `select (select last_full_sync_at from catalog_state where id = 1) as last_sync,
+                (select count(*) from webhook_events where failed_at > now() - interval '24 hours') as failed`,
+      );
+      return { lastSyncAt: rows[0]?.last_sync ?? null, failedWebhooks24h: Number(rows[0]?.failed ?? 0) };
+    },
     close: () => pool.end(),
   };
 }

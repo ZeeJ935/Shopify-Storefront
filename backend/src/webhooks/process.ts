@@ -7,6 +7,8 @@ export type ProcessDeps = {
   revalidate: () => Promise<void>;
   /** Updates the Postgres catalog for a catalog topic (absent when the catalog isn't configured). */
   catalog?: (topic: string, payload: unknown) => Promise<void>;
+  /** Called once when an event fails its last allowed attempt (e.g. to report it to Sentry). */
+  onFinalFailure?: (event: { eventId: number; topic: string }, error: unknown) => void;
   maxAttempts?: number;
 };
 
@@ -32,7 +34,10 @@ export async function processWebhookEvent(id: number, deps: ProcessDeps): Promis
   } catch (error) {
     const final = event.attempts >= max;
     await deps.store.markError(id, errorText(error), final);
-    if (final) return "failed"; // keep the error; stop retrying
+    if (final) {
+      deps.onFinalFailure?.({ eventId: id, topic: event.topic }, error);
+      return "failed"; // keep the error; stop retrying
+    }
     throw error;
   }
 }

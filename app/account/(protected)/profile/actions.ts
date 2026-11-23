@@ -7,6 +7,7 @@ import {
   updateCustomerProfile,
   type MutationResult,
 } from "@/lib/customer-account/api";
+import { reportError } from "@/lib/report-error";
 
 export async function updateProfileAction(
   formData: FormData,
@@ -37,7 +38,7 @@ export async function updateProfileAction(
   } catch (error) {
     unstable_rethrow(error);
     // Log the API detail; the shopper only needs to know it didn't save.
-    console.error("[account/profile] updateProfile", error);
+    reportError(error, { area: "account", step: "update-profile" });
     return {
       ok: false,
       message: "Could not save profile. Please try again.",

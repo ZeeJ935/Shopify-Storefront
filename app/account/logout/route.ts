@@ -6,6 +6,7 @@ import {
   clearCustomerSessionCookies,
   getCustomerSession,
 } from "@/lib/customer-account/session";
+import { reportError } from "@/lib/report-error";
 
 /**
  * Logout must be POST-only. Next.js <Link> prefetches GET routes, which was
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
   try {
     logoutUrl = await buildCustomerLogoutUrl(session?.idToken);
   } catch (error) {
-    console.error("[account/logout]", error);
+    reportError(error, { area: "account", step: "logout-url" });
   }
 
   const response = NextResponse.redirect(logoutUrl, 303);

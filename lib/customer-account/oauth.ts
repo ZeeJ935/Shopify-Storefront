@@ -18,6 +18,7 @@ import {
   getPkceCookie,
   type CustomerSession,
 } from "./session";
+import { reportError } from "@/lib/report-error";
 
 const AUTH_SCOPES = "openid email customer-account-api:full";
 
@@ -149,15 +150,15 @@ async function createStorefrontCustomerToken(
     };
     const result = json.data?.storefrontCustomerAccessTokenCreate;
     if (!response.ok || !result?.customerAccessToken) {
-      console.error(
-        "[account] storefront token not issued",
-        result?.userErrors ?? response.status,
-      );
+      reportError(new Error(`storefront token not issued (HTTP ${response.status}, ${result?.userErrors?.length ?? 0} user errors)`), {
+        area: "account",
+        step: "storefront-token",
+      });
       return undefined;
     }
     return result.customerAccessToken;
   } catch (error) {
-    console.error("[account] storefront token failed", error);
+    reportError(error, { area: "account", step: "storefront-token" });
     return undefined;
   }
 }
@@ -171,7 +172,7 @@ async function linkCurrentCart(storefrontToken: string) {
   try {
     await linkCartToCustomer(cartId, storefrontToken);
   } catch (error) {
-    console.error("[account] cart link failed", error);
+    reportError(error, { area: "account", step: "cart-link" });
   }
 }
 

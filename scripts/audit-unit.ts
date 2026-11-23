@@ -21,10 +21,10 @@ import {
 } from "../lib/customer-account/id-token";
 import { parseSessionPayload, seal, unseal } from "../lib/customer-account/seal";
 import { isServiceTokenValid } from "../lib/service-token";
+import { scrubEvent as scrubSentryEvent } from "../lib/sentry-scrub";
+import { reportError } from "../lib/report-error";
 import fs from "node:fs";
 import path from "node:path";
-import { withCatalogFallback } from "../lib/catalog-fallback";
-import { PARITY_FILE, parityJson } from "./catalog-parity";
 import { NextRequest } from "next/server";
 import { clientIp } from "../lib/client-ip";
 import { rateLimitResponse } from "../lib/proxy-rate-limit";
@@ -756,72 +756,7 @@ async function testSharedRateLimit() {
   }
 }
 
-// ---- Catalog from the backend, with the snapshot as fallback ----
-
-async function testCatalogFallback() {
-  const logs: string[] = [];
-  const log = (m: string) => logs.push(m);
-  const snapshot = { products: ["from-snapshot"] };
-  let backendCalls = 0;
-
-  // Backend answers: used.
-  const ok = await withCatalogFallback({
-    configured: true,
-    label: "catalog",
-    fromBackend: async () => ({ products: ["from-backend"], empty: false }),
-    fromSnapshot: async () => snapshot,
-    log,
-  });
-  assert.equal(ok.source, "backend");
-  assert.deepEqual(ok.value.products, ["from-backend"]);
-
-  // Backend down: snapshot, and the reason is logged.
-  const down = await withCatalogFallback({
-    configured: true,
-    label: "catalog",
-    fromBackend: async () => {
-      throw new Error("Backend request failed: 503 /v1/catalog");
-    },
-    fromSnapshot: async () => snapshot,
-    log,
-  });
-  assert.equal(down.source, "snapshot");
-  assert.deepEqual(down.value, snapshot);
-  assert.match(logs.at(-1) ?? "", /catalog fallback: Backend request failed: 503/);
-
-  // Backend reachable but nothing synced yet: snapshot, never an empty catalog.
-  const empty = await withCatalogFallback({
-    configured: true,
-    label: "overview",
-    fromBackend: async () => ({ products: [], empty: true }),
-    fromSnapshot: async () => snapshot,
-    log,
-  });
-  assert.equal(empty.source, "snapshot");
-  assert.match(logs.at(-1) ?? "", /overview fallback: backend catalog is empty/);
-
-  // Not configured (local dev, or before the switch): snapshot, backend never called.
-  const off = await withCatalogFallback({
-    configured: false,
-    label: "catalog",
-    fromBackend: async () => {
-      backendCalls++;
-      return { products: [], empty: false };
-    },
-    fromSnapshot: async () => snapshot,
-    log,
-  });
-  assert.equal(off.source, "snapshot");
-  assert.equal(backendCalls, 0);
-}
-
-function testCatalogParityAndSharedCode() {
-  // The backend's parity fixture must match what the old logic produces today.
-  assert.equal(
-    fs.readFileSync(PARITY_FILE, "utf8"),
-    parityJson(),
-    "backend/test/fixtures/catalog-parity.json is stale: run npx tsx scripts/catalog-parity.ts --write",
-  );
+function testSharedCatalogCode() {
   // The backend's copy of the shared catalog code must be identical.
   const appDir = path.join(__dirname, "../lib/catalog-shared");
   const backendDir = path.join(__dirname, "../backend/src/catalog-shared");
@@ -836,6 +771,50 @@ function testCatalogParityAndSharedCode() {
   }
 }
 
+// ---- Sentry: scrubbing and reporting with Sentry off ----
+
+function testSentryScrub() {
+  const token = "t".repeat(48);
+  const event = scrubSentryEvent({
+    message: `cart link failed for shopper@example.com (gid://shopify/Customer/123456) Bearer ${token}`,
+    user: { id: "123456", email: "shopper@example.com", ip_address: "203.0.113.9" },
+    request: {
+      url: "https://shop.example/account/callback?code=OAUTH-CODE&state=STATE",
+      query_string: "code=OAUTH-CODE",
+      cookies: { "zj-ca-session": "SEALED" },
+      data: { email: "shopper@example.com" },
+      headers: { cookie: "zj-ca-session=SEALED", authorization: `Bearer ${token}`, "x-zj-return-to": "/account/orders", "user-agent": "Mozilla" },
+    },
+    exception: { values: [{ type: "Error", value: "phone +92 300 1234567 failed" }] },
+    breadcrumbs: [{ category: "navigation", data: { from: "/account/login?returnTo=%2Faccount", to: "/account?x=1" } }],
+    extra: { customerId: "123456", address: "House 40", note: "ok" },
+    contexts: { browser: { name: "Chrome" }, profile: { firstName: "Zain" } },
+  });
+  const json = JSON.stringify(event);
+  for (const secret of ["shopper@example.com", "123456", token, "OAUTH-CODE", "SEALED", "/account/orders", "returnTo", "House 40", "Zain", "300 1234567", "203.0.113.9"]) {
+    assert.ok(!json.includes(secret), `scrubbed event still contains ${secret}`);
+  }
+  assert.equal(event.request.url, "https://shop.example/account/callback");
+  assert.equal(event.request.headers["user-agent"], "Mozilla");
+  assert.equal(event.contexts.browser.name, "Chrome");
+  assert.equal("user" in event, false);
+}
+
+function testReportErrorWithSentryOff() {
+  const saved = process.env.SENTRY_DSN;
+  delete process.env.SENTRY_DSN;
+  const original = console.error;
+  const lines: string[] = [];
+  console.error = (...args: unknown[]) => void lines.push(args.join(" "));
+  try {
+    reportError(new Error("boom"), { area: "test" });
+    assert.deepEqual(lines, ["[test] Error: boom"]);
+  } finally {
+    console.error = original;
+    if (saved !== undefined) process.env.SENTRY_DSN = saved;
+  }
+}
+
 testRateLimiter();
 testSameOrigin();
 testApplyPendingEdits();
@@ -847,11 +826,12 @@ testMergeForLogin();
 testPickFavouritesStore();
 testServiceToken();
 testClientIp();
-testCatalogParityAndSharedCode();
+testSharedCatalogCode();
+testSentryScrub();
+testReportErrorWithSentryOff();
 testLoadFavourites()
   .then(testFavouritesErrorReporting)
   .then(testSharedRateLimit)
-  .then(testCatalogFallback)
   .then(() => console.log("audit-unit: all assertions passed"))
   .catch((error) => {
     console.error(error);

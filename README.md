@@ -9,7 +9,7 @@ Next.js App Router storefront for a Shopify shop (Nike / Adidas demo catalog). U
 | Area | What’s included |
 |------|-----------------|
 | Catalog | Home, collections (filters/sort, infinite scroll with retry), product detail, search + predictive search |
-| Catalog data | Served from the backend's Postgres (`/v1/catalog`, synced by Shopify webhooks plus a nightly full sync); filters, sorting, facets and paging run in SQL with the same results as before. If the backend is off, down or not yet synced, the old in-memory snapshot answers instead (`lib/catalog-source.ts`) |
+| Catalog data | Served from the backend's Postgres (`/v1/catalog`, synced by Shopify webhooks plus a nightly full sync); filters, sorting, facets and paging run in SQL. If the backend can't answer, catalog pages show a "couldn't load products" state with **Try again** (`app/collections/error.tsx`) instead of an empty catalog |
 | Cart | Cookie cart, slide-out drawer, instant (optimistic) quantity changes batched into one request, discounts, Shopify hosted checkout |
 | Stock | Quantity limited to available stock, “Only N left”, sold-out and backorder states; Shopify’s stock warnings shown on cart lines |
 | Account | Login/signup via Shopify, overview, orders (newer/older paging), addresses CRUD with country list, profile |
@@ -52,6 +52,10 @@ Copy from `.env.example`. Never prefix Storefront, Customer Account or backend s
 | `BACKEND_SERVICE_TOKEN` | Shared secret for calling the backend; must match the backend's value |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL for shared rate limiting. Optional; without it (local dev) limits are kept in memory per instance |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token (pair with the URL above) |
+| `SENTRY_DSN` | Optional. Sentry DSN for server errors; without it Sentry is off |
+| `NEXT_PUBLIC_SENTRY_DSN` | Optional. Sentry DSN for browser errors (usually the same value) |
+| `SENTRY_AUTH_TOKEN` · `SENTRY_ORG` · `SENTRY_PROJECT` | Optional. Upload source maps at build time for readable stack traces (all three needed) |
+| `SENTRY_DEBUG` | Local testing only: `1` enables `GET /api/debug/sentry`, which throws on purpose |
 
 Full Admin steps (Headless channel, New customer accounts, favourites metafield): **[docs/customer-accounts-admin.md](docs/customer-accounts-admin.md)**.
 
@@ -131,6 +135,16 @@ Webhooks now go to the **backend** (`POST /webhooks/shopify`): it checks the sig
 Topics that refresh the catalog: product, collection and inventory level create/update/delete.
 
 The webhook signing secret (`SHOPIFY_WEBHOOK_SECRET`) now lives only on the backend.
+
+## Error reporting (Sentry)
+
+With `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` set, errors go to Sentry; without them nothing changes (Sentry isn't even in the browser bundle).
+
+- **Server:** rendering, route handler and server action errors (`instrumentation.ts` → `onRequestError`), plus errors the app catches but needs to know about (`lib/report-error.ts`: login and token refresh, cart and account actions, favourites backend failures, catalog API). The friendly error pages still show.
+- **Browser:** errors caught by `app/error.tsx`, `app/collections/error.tsx` and `app/global-error.tsx`.
+- **Privacy:** before sending, cookies, the `authorization` and other auth headers, request bodies, query strings and user data are removed, and emails, customer IDs, phone numbers and tokens in messages are masked (`lib/sentry-scrub.ts`). Performance traces are sampled at 10%.
+
+**Test it locally:** set `SENTRY_DSN` and `SENTRY_DEBUG=1` in `.env`, `npm run build && npm start`, then open `/api/debug/sentry` (500 and a "Sentry test error" event). Browser errors are reported when `NEXT_PUBLIC_SENTRY_DSN` is set and an error page catches an error in the browser. The backend has its own: see `backend/README.md → Monitoring`.
 
 ## Security notes
 

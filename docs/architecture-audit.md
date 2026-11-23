@@ -28,6 +28,7 @@
 | Content | Items flagged `demo` (placeholder links, unconfirmed promos) are hidden | `lib/site-content.ts` |
 | Tests | `scripts/audit-unit.ts` also covers sale price, return paths, rate limiter, origin check, webhook signatures | `scripts/audit-unit.ts` |
 | Webhooks (2026-11-20) | Moved to the backend: `POST /webhooks/shopify` records, dedupes and retries (pg-boss), then calls the storefront's token-protected `/api/revalidate`. The old `/api/webhooks/shopify` and `lib/shopify-webhook.ts` are removed; later rows below that mention them describe the earlier setup | `backend/src/routes/webhooks.ts`, `app/api/revalidate/route.ts` |
+| Catalog (2026-11-23) | Products, collections and best-selling order live in the backend's Postgres (`/v1/catalog`), synced by webhooks plus a nightly full sync. The in-memory snapshot (`lib/catalog-snapshot.ts`) is removed; if the backend can't answer, catalog pages show a retry state. Rows below that mention the snapshot describe the earlier setup | `lib/catalog-source.ts`, `backend/src/catalog/` |
 
 Still open: policy pages, post-checkout thank-you, analytics/consent, Markets/i18n, variant option pickers, CI.
 

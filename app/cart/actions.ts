@@ -24,6 +24,7 @@ import {
   type CartLineNotice,
 } from "@/lib/cart-notices";
 import { getCustomerSession } from "@/lib/customer-account/session";
+import { reportError } from "@/lib/report-error";
 
 const DISCOUNT_CODE_MAX_LENGTH = 50;
 const INVALID_DISCOUNT_MESSAGE =
@@ -148,10 +149,7 @@ async function createCartWithItem(
     }
     // An expired or rejected customer token must not block buying; lose the
     // account link (checkout can still log in) rather than the add.
-    console.error(
-      "[cart] create with buyer identity failed; retrying without",
-      error,
-    );
+    reportError(error, { area: "cart", step: "create-with-buyer-identity" });
     result = await createCart(lines);
   }
 

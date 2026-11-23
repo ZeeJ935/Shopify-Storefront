@@ -82,28 +82,14 @@ export default async function CollectionPage({
   if (!meta) notFound();
 
   // Empty collections (e.g. nike) still render; membership may be empty.
-  let result: Awaited<ReturnType<typeof queryCatalog>>;
-  try {
-    result = await queryCatalog({
-      scope: handle,
-      filters,
-      sort,
-      page: 1,
-    });
-  } catch {
-    result = {
-      products: [],
-      total: 0,
-      page: 1,
-      pageCount: 1,
-      hasNextPage: false,
-      facets: [],
-      priceBounds: { min: 0, max: 0 },
-      sort,
-      sortOptions: [],
-      hideGenderFacet: false,
-    };
-  }
+  // If the catalog can't load, app/collections/error.tsx shows a retry state
+  // instead of an empty catalog.
+  const result = await queryCatalog({
+    scope: handle,
+    filters,
+    sort,
+    page: 1,
+  });
 
   return (
     <main className="py-8 lg:py-12">

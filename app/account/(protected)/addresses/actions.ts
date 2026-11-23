@@ -10,13 +10,14 @@ import {
   type CustomerAddressInput,
   type MutationResult,
 } from "@/lib/customer-account/api";
+import { reportError } from "@/lib/report-error";
 
 /**
  * API/network failures: log the detail on the server, show the shopper a
  * plain message. (Shopify userErrors are customer-facing and pass through.)
  */
 function failure(action: string, error: unknown, message: string): MutationResult {
-  console.error(`[account/addresses] ${action}`, error);
+  reportError(error, { area: "account", step: `address-${action}` });
   return { ok: false, message };
 }
 

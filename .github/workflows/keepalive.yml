@@ -1,0 +1,39 @@
+name: Keep backend awake
+
+# Render's free plan sleeps the backend after 15 minutes without traffic, and
+# waking takes about a minute, during which catalog pages show "couldn't load
+# products". Pinging /health every 10 minutes keeps it awake (one always-on
+# service fits the free plan's 750 hours a month). GitHub may start scheduled
+# runs a few minutes late.
+#
+# Set the repository variable BACKEND_HEALTH_URL (Settings → Secrets and
+# variables → Actions → Variables), e.g. https://<your-api>.onrender.com/health
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health
+        env:
+          URL: ${{ vars.BACKEND_HEALTH_URL }}
+        run: |
+          if [ -z "$URL" ]; then
+            echo "::notice::BACKEND_HEALTH_URL is not set; skipping."
+            exit 0
+          fi
+          # A cold start can take about a minute.
+          code=$(curl -s -o body.json -w '%{http_code}' --max-time 120 "$URL" || echo "000")
+          echo "HTTP $code"; cat body.json 2>/dev/null || true; echo
+          if [ "$code" = "503" ]; then
+            echo "::warning::Backend is up but reports the database as down."
+          elif [ "$code" != "200" ]; then
+            echo "::warning::Backend did not answer /health (HTTP $code)."
+          fi

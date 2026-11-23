@@ -6,7 +6,8 @@ import type { FavouritesRepo } from "./db/favourites.js";
 import { webhookRoutes, type WebhookRouteDeps } from "./routes/webhooks.js";
 import { catalogRoutes, type CatalogRouteDeps } from "./routes/catalog.js";
 import { favouritesRoutes } from "./routes/favourites.js";
-import { healthRoutes } from "./routes/health.js";
+import { healthRoutes, type HealthDetails } from "./routes/health.js";
+import type { ReportError } from "./report.js";
 import { meRoutes } from "./routes/me.js";
 
 export type AppDeps = {
@@ -14,14 +15,20 @@ export type AppDeps = {
   customers: CustomersRepo;
   favourites: FavouritesRepo;
   pingDb: () => Promise<void>;
+  /** Extra /health fields: last catalog sync, failed webhooks (absent in tests that don't need them). */
+  healthDetails?: () => Promise<HealthDetails>;
   webhooks: WebhookRouteDeps;
   /** Catalog endpoints (absent in tests that don't need them). */
   catalog?: CatalogRouteDeps;
   logger?: FastifyServerOptions["logger"];
+  /** Where unexpected errors go (Sentry + log). */
+  report?: ReportError;
+  /** Enables GET /v1/debug/sentry, which throws on purpose to test error reporting. */
+  debugRoutes?: boolean;
 };
 
 /** Builds the app with its dependencies injected, so tests can run without a database. */
-export function buildApp({ serviceToken, customers, favourites, pingDb, webhooks, catalog, logger = false }: AppDeps) {
+export function buildApp({ serviceToken, customers, favourites, pingDb, healthDetails, webhooks, catalog, logger = false, report, debugRoutes = false }: AppDeps) {
   const app = Fastify({
     // Strict bodies: no type coercion ("1" for 1, "x" for ["x"]) and no silently dropped fields.
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
@@ -30,9 +37,31 @@ export function buildApp({ serviceToken, customers, favourites, pingDb, webhooks
         ? false
         : {
             ...(typeof logger === "object" ? logger : {}),
-            // Never log the service token or customer IDs.
-            redact: ["req.headers.authorization", 'req.headers["x-customer-id"]'],
+            // Belt and braces: request lines below never include headers, but if
+            // anything logs a request object, the secrets are masked.
+            redact: [
+              "req.headers.authorization",
+              'req.headers["x-customer-id"]',
+              'req.headers["x-shopify-hmac-sha256"]',
+              "req.headers.cookie",
+            ],
           },
+    // One structured line per request instead of Fastify's two (see onResponse below).
+    disableRequestLogging: true,
+  });
+
+  // { reqId, method, route, status, durationMs }: the route pattern, never the URL
+  // (query strings can carry anything), and no headers or bodies.
+  app.addHook("onResponse", async (request, reply) => {
+    request.log.info(
+      {
+        method: request.method,
+        route: request.routeOptions.url ?? "unmatched",
+        status: reply.statusCode,
+        durationMs: Math.round(reply.elapsedTime * 10) / 10,
+      },
+      "request",
+    );
   });
 
   // Our own error handler so 500s are logged without SQL parameters (customer IDs).
@@ -41,11 +70,13 @@ export function buildApp({ serviceToken, customers, favourites, pingDb, webhooks
     const code = (error as { statusCode?: unknown } | null)?.statusCode;
     const status = typeof code === "number" && code >= 400 ? code : 500;
     if (status < 500) return reply.send(error);
-    request.log.error({ err: safeError(error), route: request.routeOptions.url }, "request failed");
+    const route = request.routeOptions.url ?? "unmatched";
+    request.log.error({ err: safeError(error), route }, "request failed");
+    report?.(error, { kind: "request", route });
     return reply.code(500).send({ error: "internal_error" });
   });
 
-  healthRoutes(app, pingDb);
+  healthRoutes(app, pingDb, healthDetails);
 
   // Public: Shopify signs these; the HMAC is the auth (no service token).
   app.register((instance) => webhookRoutes(instance, webhooks));
@@ -57,6 +88,12 @@ export function buildApp({ serviceToken, customers, favourites, pingDb, webhooks
       meRoutes(v1, customers);
       favouritesRoutes(v1, favourites);
       if (catalog) catalogRoutes(v1, catalog);
+      // Throws on purpose so error reporting can be checked end to end.
+      if (debugRoutes) {
+        v1.get("/v1/debug/sentry", async () => {
+          throw new Error("Sentry test error from the backend (GET /v1/debug/sentry)");
+        });
+      }
     },
   );
 
