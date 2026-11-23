@@ -93,6 +93,36 @@ jobs:
       - name: Tests
         run: npm test
 
+  # Staff admin app (admin/): its own package; no secrets needed to lint, test and build.
+  admin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   # Browser tests against a local production build, with a throwaway Postgres
   # and a catalog synced from the real store. Pull requests and manual runs only;
   # skipped (with a notice) when the Shopify secrets aren't available, e.g. on

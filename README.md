@@ -1,6 +1,6 @@
 # ZJ Headless Storefront
 
-Next.js App Router storefront for a Shopify shop (Nike / Adidas demo catalog). Uses the **Storefront API** for catalog/cart/checkout and the **Customer Account API** (OAuth + PKCE) for login, orders, addresses and profile. Favourites are stored in Postgres through the separate [backend](backend/README.md) when it is configured.
+Next.js App Router storefront for a Shopify shop (Nike / Adidas demo catalog). Uses the **Storefront API** for catalog/cart/checkout and the **Customer Account API** (OAuth + PKCE) for login, orders, addresses and profile. Favourites are stored in Postgres through the separate [backend](backend/README.md) when it is configured. Staff use a separate internal [admin app](admin/README.md) (Google sign-in, roles, audit log).
 
 **Stack:** Next.js 16 · React 19 · TypeScript · Tailwind CSS 4 · Shopify GraphQL `2026-10`
 
