@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { navFor } from "@/lib/fulfill";
 import { requireSession } from "@/lib/session-server";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -9,6 +10,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <nav>
           <strong>ZJ Admin</strong>
           <Link href="/">Home</Link>
+          {navFor(staff.role).map((item) => (
+            <Link key={item.href} href={item.href}>
+              {item.label}
+            </Link>
+          ))}
         </nav>
         <form method="post" action="/logout" style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <span className="muted">
