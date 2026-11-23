@@ -19,13 +19,15 @@ The token is checked first, so a caller without it learns nothing about the othe
 
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
-| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, inventory: { lastSyncAt, stale }, orders: { lastSyncAt, stale }, webhooks: { failedLast24h }, adminApi? }`. `503` only when the database is down; a stale catalog/inventory/orders sync (none in 26 h), failed webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
+| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, inventory: { lastSyncAt, stale }, orders: { lastSyncAt, stale }, webhooks: { failedLast24h, stuck, oldestStuckAt }, adminApi? }`. `503` only when the database is down; a stale catalog/inventory/orders sync (none in 26 h), failed or stuck webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
 | GET | `/v1/inventory/locations` | token | All locations (`id`, name, active, fulfillsOnlineOrders) |
 | GET | `/v1/inventory/levels` | token | Levels with optional `sku`, `location_id`, `low_stock_below`, `cursor`, `limit` (≤100). Keyset pagination; `nextCursor` when more |
 | GET | `/v1/inventory/items/:id` | token | Item by Shopify GID or numeric id, levels per location, last 20 history rows |
 | POST | `/v1/inventory/sync` | token | Queues a full inventory sync; `202` (`503` if Admin isn't configured) |
 | GET | `/v1/orders` | token | Orders with optional `status`, `financial_status`, `fulfillment_status`, `from`, `to`, `sku`, `cursor`, `limit` (≤100). Newest first; `nextCursor` when more |
-| GET | `/v1/orders/:id` | token | Order by Shopify GID or numeric id, with lines |
+| GET | `/v1/orders/:id` | token | Order by Shopify GID or numeric id, with lines, `fulfillmentOrders` (with lines) and `fulfillments` |
+| POST | `/v1/fulfillments` | token + `Idempotency-Key` | Fulfill one fulfillment order (see [Fulfillment actions](#fulfillment-actions)). `202` queued, `200` dry run or replay, `409` key reused with a different body, `422` fails checks, `503` if Admin is off (dry runs still work) |
+| GET | `/v1/fulfillments/:key` | token | Status of a fulfillment action by its idempotency key |
 | POST | `/v1/orders/sync` | token | Queues a full orders sync (last 60 days); `202` (`503` if Admin isn't configured) |
 | GET | `/v1/me` | token + customer ID | `{ customerId, firstSeenAt }`; records the customer (insert, or update `last_seen_at`) |
 | GET | `/v1/favourites` | token + customer ID | `{ ids, imported }` (`imported` is from the old one-time migration; the storefront ignores it) |
@@ -34,7 +36,7 @@ The token is checked first, so a caller without it learns nothing about the othe
 | GET | `/v1/catalog` | token | Catalog query: `scope`, `brand`, `type`, `gender`, `size`, `color`, `sale`, `available`, `price_min`, `price_max`, `sort`, `page` or `cursor`, `limit` (≤100), `q`. Products, totals, facet counts, `nextCursor`; `empty: true` if nothing is synced yet |
 | GET | `/v1/products/by-ids` | token | `?ids=a,b` (≤250): products in the order asked, unknown IDs skipped |
 | GET | `/v1/catalog/overview` | token | Light product list in catalog order (handle, brand, image, dates) for the nav and sitemap |
-| GET | `/v1/debug/sentry` | token | Throws on purpose, to test error reporting (see below) |
+| GET | `/v1/debug/sentry` | token | Only when `SENTRY_DEBUG=1`. Throws on purpose, to test error reporting (see below) |
 | POST | `/v1/catalog/sync` | token | Queues a full catalog sync; `202` (`503` if Storefront access isn't configured) |
 | POST | `/webhooks/shopify` | Shopify HMAC (no service token) | Records the event, drops duplicates, answers `200` at once; catalog topics are processed by the queue (see below) |
 
@@ -61,6 +63,7 @@ Names only. Copy `.env.example` to `.env`.
 | `BACKEND_PUBLIC_URL` | Public origin of this API (no trailing slash). Used by `npm run webhooks:register`. Optional at API start |
 | `SENTRY_DSN` | Optional. Sentry project DSN; without it error reporting is off and nothing else changes |
 | `SENTRY_ENVIRONMENT` | Optional. Environment name shown in Sentry (default: `NODE_ENV`) |
+| `SENTRY_DEBUG` | Optional. `1` turns on `GET /v1/debug/sentry`; any other value or unset leaves it off (404) |
 
 ## Run locally
 
@@ -83,7 +86,7 @@ Stop with Ctrl+C and `docker compose down`. The data volume is kept; `docker com
 
 1. **Record and dedupe.** Each webhook is stored once in `webhook_events`, keyed by `X-Shopify-Webhook-Id`. A repeat delivery gets `200 {"ok":true,"duplicate":true}` and is ignored. Storing the event and queueing it happen in one transaction, so a failure leaves nothing behind and Shopify's retry is processed normally. `X-Shopify-Triggered-At` and `X-Shopify-Api-Version` are stored when present (`triggered_at`, `api_version`).
 2. **Answer fast.** The response is sent as soon as the event is stored; processing happens in the queue.
-3. **Topic router.** Handled topics are dispatched to an ordered list of handlers (several handlers can share one topic; on retry the whole chain re-runs — handlers must be idempotent). On `inventory_levels/update` the order is catalog → inventory → revalidate. Placeholder handlers for orders/fulfillments log topic + id only until later steps fill them in.
+3. **Topic router.** Handled topics are dispatched to an ordered list of handlers (several handlers can share one topic; on retry the whole chain re-runs — handlers must be idempotent). On `inventory_levels/update` the order is catalog → inventory → revalidate. Topics whose real handler is not configured (Admin off) fall back to placeholder handlers that log topic + id only.
 4. **Process in a queue.** pg-boss (Postgres, schema `pgboss`; no Redis) runs in the API process. Catalog topics clear the storefront's cache by calling `POST {STOREFRONT_URL}/api/revalidate` with the service token.
 5. **Retry, then fail.** A failed attempt is retried with exponential backoff (about 30 s, 1, 2, 4 min), 5 attempts in total. After that the event gets `failed_at`, and `last_error` keeps the reason (no query values or secrets).
 
@@ -93,7 +96,7 @@ Stop with Ctrl+C and `docker compose down`. The data volume is kept; `docker com
 
 **Orders topics** (Admin re-fetch; payload `{ id }` only): `orders/create`, `orders/paid`, `orders/updated`, `orders/cancelled`.
 
-**Placeholder topics** (queued; payload stored as `{ id }` only — never emails, names, addresses or phones): `fulfillments/create|update`, and any `fulfillment_orders/*` topic. Unknown topics are recorded without a payload and ignored.
+**Stored payloads for non-catalog topics** (never emails, names, addresses or phones): inventory/location/order topics keep `{ id }`; `fulfillments/create|update` keep `{ id, order_id }`; `fulfillment_orders/*` keep `{ ids }` (the FulfillmentOrder GIDs found in the payload). Unknown topics are recorded without a payload and ignored.
 
 **What's stuck or failed:**
 ```sql
@@ -155,16 +158,27 @@ After every sync the storefront's cache is cleared (`POST {STOREFRONT_URL}/api/r
 **Errors (Sentry).** With `SENTRY_DSN` set, these are reported, each tagged:
 - unexpected request errors (500s): `kind=request`, `route`
 - a webhook that failed its last retry: `kind=webhook`, `topic`, `event_id`
+- a stuck webhook with no attempts left: `kind=webhook`, `topic`, `event_id`, `reason=stuck`
+- a maintenance job that failed its last attempt: `kind=job`, `job=webhook-maintenance|webhook-purge`
 - a catalog sync that failed its last attempt: `kind=job`, `job=catalog-full-sync`, `reason`
 - uncaught exceptions and unhandled promise rejections
 
 Before anything is sent, request bodies (webhook payloads), cookies, query strings, the `authorization` / `x-customer-id` / signature headers and user data are dropped, and tokens and email addresses in messages are masked (`src/sentry-scrub.ts`). Performance traces are sampled at 10%.
 
-**Test it:** `curl -H "Authorization: Bearer $BACKEND_SERVICE_TOKEN" https://<your-api>/v1/debug/sentry` returns 500 and sends a "Sentry test error" event (tagged `kind=request`). Without a DSN it's only logged.
+**Test it:** set `SENTRY_DEBUG=1` (the route is off otherwise), then `curl -H "Authorization: Bearer $BACKEND_SERVICE_TOKEN" https://<your-api>/v1/debug/sentry` returns 500 and sends a "Sentry test error" event (tagged `kind=request`). Without a DSN it's only logged.
 
 **Logs.** One JSON line per request: `reqId`, `method`, `route` (the pattern, never the URL, so no query strings), `status`, `durationMs`. Headers, bodies and webhook payloads are never logged; the service token, customer ID, signature and cookie headers are also redacted as a safety net.
 
-**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale`, `inventory.stale`, `orders.stale`, `webhooks.failedLast24h`, and `adminApi` (when configured) for slower problems. An Admin API failure is a warning field, not a `503`.
+**Health.** `GET /health` is safe to point an uptime monitor at: it's `503` only when the database is down. Check `catalog.stale`, `inventory.stale`, `orders.stale`, `webhooks.failedLast24h`, `webhooks.stuck`, and `adminApi` (when configured) for slower problems. An Admin API failure is a warning field, not a `503`.
+
+**Stuck webhooks and retention** (`src/webhooks/maintenance.ts`, pg-boss):
+
+| Queue | Schedule (UTC) | What it does |
+|-------|----------------|--------------|
+| `webhook-maintenance` | every 15 min | Events neither processed nor failed and received over 30 min ago are *stuck* (usually the worker died mid-attempt). With attempts left: queued again (handlers are idempotent; one copy per event per 15 min). With none left: marked failed and reported. |
+| `webhook-purge` | `0 5 * * *` | Deletes processed events older than 30 days and failed events older than 90 days, 5,000 rows per statement. Pending events are never deleted. |
+
+`webhooks.stuck` on `/health` counts stuck events; `oldestStuckAt` is when the oldest one arrived.
 
 ## Locations and inventory
 
@@ -186,6 +200,44 @@ Orders live in Postgres (`orders`, `order_lines`, `orders_state`) synced from th
 
 **Backfill:** on first start with an empty `orders` table, a sync is queued via the same singleton as manual sync. To run one by hand: `npm run orders:backfill`, `npm run orders:backfill:prod`, or `POST /v1/orders/sync`.
 
+## Fulfillment orders and fulfillments
+
+Stored per order in `fulfillment_orders`, `fulfillment_order_lines` and `fulfillments` (all cascade with the order), synced from the **Admin GraphQL API** (`src/fulfillments/`). **No personal data:** `destination`, `deliveryMethod`, addresses and contact fields are never requested or stored. Tracking company/number/url (first entry) are stored.
+
+**Kept in sync by** re-fetching the whole order's fulfillment data (fulfillment orders paged by 25, their lines by 50; `Order.fulfillments` is an unpaged list read up to 100):
+- **Orders webhooks and the nightly orders sync**, after an order upsert, only when the order is new, its `updated_at` changed, or `orders.fulfillments_synced_at` is null (so the nightly run skips unchanged orders).
+- **`fulfillment_orders/*` webhooks**: resolve the order from the first accessible fulfillment order id, then refresh it.
+- **`fulfillments/create|update` webhooks**: refresh by `order_id`. If the order is not stored yet, it is fetched and upserted first.
+
+Rows are only overwritten by an equal-or-newer Shopify `updatedAt`. Rows missing from a complete fetch are deleted, except rows written since that fetch started (a newer concurrent refresh); fulfillments are never pruned when the list may have been truncated (100 entries). An order Shopify will not return (older than 60 days) is skipped and logged.
+
+### Fulfillment actions
+
+`POST /v1/fulfillments` creates a fulfillment through Admin `fulfillmentCreate` (scope `write_merchant_managed_fulfillment_orders`). Staff login will call it later through `/admin` routes; for now the service token is enough.
+
+```http
+POST /v1/fulfillments
+Authorization: Bearer <BACKEND_SERVICE_TOKEN>
+Idempotency-Key: 8–200 chars of A-Z a-z 0-9 . _ : -   (a UUID is ideal)
+
+{
+  "fulfillment_order_id": "gid://shopify/FulfillmentOrder/123",   // or "123"
+  "lines": [{ "id": "gid://shopify/FulfillmentOrderLineItem/456", "quantity": 1 }],  // omit = all remaining
+  "tracking": { "company": "UPS", "number": "1Z…", "url": "https://…" },          // optional; url needs number
+  "notify_customer": false,   // default false — no customer email unless set to true
+  "dry_run": true             // default false
+}
+```
+
+- **Idempotency.** One `fulfillment_actions` row per key. The same key with the same body returns the existing action (`replayed: true`) and never queues a second job; the same key with a different body (including `dry_run`) is `409`.
+- **Checks** against synced data before anything is saved: the fulfillment order exists and is `OPEN`/`IN_PROGRESS`, every line belongs to it, and quantities are within what remains (`422` with the reason). The job checks again live before calling Shopify.
+- **Dry run** saves the action as `dry_run` and returns `wouldSend` (the exact `fulfillmentCreate` input). No job, no Shopify call.
+- **Real runs** are saved as `pending` with a `fulfillment-create` pg-boss job in the same transaction (3 attempts, 30 s backoff). The job marks the action `submitting`, re-checks live, calls `fulfillmentCreate`, then stores `succeeded` + the fulfillment id and refreshes the order's fulfillment data. Shopify `userErrors` or a failed live check are final (`failed`, no retry). After the last failed attempt the action is `failed` and reported to Sentry (`kind=job`, `job=fulfillment-create`).
+- **No double fulfillments on retry.** `fulfillmentCreate` has no `@idempotent` support in 2026-10, so a retry that finds the action still `submitting` (the earlier attempt may have reached Shopify) first looks for a fulfillment on that fulfillment order created since that attempt (60 s clock slack) and adopts it instead of sending again. Known gap: if staff fulfill the same fulfillment order by hand in that window, the retry adopts their fulfillment.
+- The stored request holds the fulfillment order id, lines, tracking and the notify flag only — never addresses or contact details.
+
+Statuses: `pending` → `submitting` → `succeeded` | `failed`; `dry_run` rows never run.
+
 ## Shopify Admin API
 
 The backend talks to the GraphQL Admin API with a **Dev Dashboard** app using the [client credentials grant](https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant) (`POST /admin/oauth/access_token`). Access tokens are cached in memory and refreshed from the response `expires_in` (and on `401`). Tokens are never logged.
@@ -201,8 +253,9 @@ Admin is optional: without `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_ADMIN_CLIENT_ID`, an
 - `read_orders`
 - `read_merchant_managed_fulfillment_orders`
 - `write_merchant_managed_fulfillment_orders`
+- `read_fulfillments` (needed for `fulfillments/*` subscriptions; add it on a new app version and reinstall)
 
-`read_all_orders` is **not** added yet. `read_fulfillments` is also not added yet (needed before registering `fulfillments/*` subscriptions).
+`read_all_orders` is **not** added yet.
 
 ### Register app webhook subscriptions
 
@@ -213,9 +266,8 @@ Catalog webhooks (`products/*`, `collections/*`, `inventory_levels/update`) stay
 | `inventory_items/update` | `read_inventory` |
 | `locations/create`, `update`, `delete` | `read_locations` |
 | `orders/create`, `paid`, `updated`, `cancelled` | `read_orders` (may fail until protected customer data access is approved — expected) |
+| `fulfillments/create`, `update` | `read_fulfillments` (fails until the new app version is installed) |
 | selected `fulfillment_orders/*` (exact API names only) | `read_merchant_managed_fulfillment_orders` |
-
-`fulfillments/create` and `fulfillments/update` have placeholder handlers in the router but are **not** registered until the fulfillment step adds `read_fulfillments`.
 
 ```bash
 # set BACKEND_PUBLIC_URL=https://<your-api>.onrender.com (and Admin env vars)

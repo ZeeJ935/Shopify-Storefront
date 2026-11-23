@@ -49,6 +49,41 @@ function sample(partial: Partial<RemoteOrder> & { shopifyId: string; name: strin
   };
 }
 
+/**
+ * Runs `competing` in an open transaction on its own connection, starts `call` (which
+ * then blocks on the row lock), waits until it is really waiting, and commits.
+ */
+async function raceAgainstUncommittedInsert<T>(
+  pool: pg.Pool,
+  admin: pg.Pool,
+  dbName: string,
+  competing: (client: pg.PoolClient) => Promise<void>,
+  call: () => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await competing(client);
+    const pending = call();
+    for (let i = 0; ; i++) {
+      const { rows } = await admin.query<{ c: number }>(
+        "select count(*)::int as c from pg_stat_activity where datname = $1 and wait_event_type = 'Lock'",
+        [dbName],
+      );
+      if (rows[0].c > 0) break;
+      if (i > 200) throw new Error("call never blocked on the competing insert");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await client.query("commit");
+    return await pending;
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 describe.skipIf(!url)("orders in Postgres", () => {
   const dbName = `orders_test_${randomUUID().slice(0, 8)}`;
   const admin = new pg.Pool({ connectionString: url, max: 1 });
@@ -114,8 +149,51 @@ describe.skipIf(!url)("orders in Postgres", () => {
     expect(skus.rows.map((r) => r.sku)).toEqual(["A"]);
   });
 
+  it("race: a concurrent newer insert is not overwritten by an older upsert", async () => {
+    const id = "gid://shopify/Order/3001";
+    const result = await raceAgainstUncommittedInsert(
+      pool,
+      admin,
+      dbName,
+      async (c) => {
+        const { rows } = await c.query<{ id: string }>(
+          `insert into orders (shopify_id, name, updated_at) values ($1, 'newer', '2026-03-02T00:00:00Z') returning id`,
+          [id],
+        );
+        await c.query(`insert into order_lines (order_id, shopify_id, title) values ($1, 'gid://shopify/LineItem/newer', 'Newer')`, [
+          rows[0].id,
+        ]);
+      },
+      () => store.upsertOrder(sample({ shopifyId: id, name: "older", updatedAt: "2026-03-01T00:00:00Z" })),
+    );
+    expect(result).toEqual({ applied: false });
+    const order = await pool.query("select name from orders where shopify_id = $1", [id]);
+    expect(order.rows[0].name).toBe("newer");
+    const lines = await pool.query(
+      "select ol.shopify_id from order_lines ol join orders o on o.id = ol.order_id where o.shopify_id = $1",
+      [id],
+    );
+    expect(lines.rows.map((r) => r.shopify_id)).toEqual(["gid://shopify/LineItem/newer"]);
+  });
+
+  it("race: a newer upsert still wins over a concurrent older insert", async () => {
+    const id = "gid://shopify/Order/3002";
+    const result = await raceAgainstUncommittedInsert(
+      pool,
+      admin,
+      dbName,
+      async (c) => {
+        await c.query(`insert into orders (shopify_id, name, updated_at) values ($1, 'older', '2026-03-01T00:00:00Z')`, [id]);
+      },
+      () => store.upsertOrder(sample({ shopifyId: id, name: "newer", updatedAt: "2026-03-02T00:00:00Z" })),
+    );
+    expect(result.applied).toBe(true);
+    const order = await pool.query("select name from orders where shopify_id = $1", [id]);
+    expect(order.rows[0].name).toBe("newer");
+  });
+
   it("lists with filters and keyset cursor", async () => {
-    await pool.query("truncate order_lines, orders, orders_state restart identity");
+    await pool.query("truncate order_lines, orders, orders_state restart identity cascade");
     const orders: RemoteOrder[] = [
       sample({ shopifyId: ORDER, name: "#2001", createdAt: "2026-02-02T00:00:00Z", financialStatus: "PAID" }),
       sample({

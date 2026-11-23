@@ -3,6 +3,7 @@ import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { runSyncAttempt } from "../src/catalog/jobs.js";
+import { readEnv } from "../src/env.js";
 import { createReporter } from "../src/report.js";
 import { STALE_AFTER_MS, type HealthDetails } from "../src/routes/health.js";
 import { scrubEvent, scrubText } from "../src/sentry-scrub.js";
@@ -56,7 +57,7 @@ describe("GET /health", () => {
       catalog: { lastSyncAt: lastSyncAt.toISOString(), stale: false },
       inventory: { lastSyncAt: inventoryLastSyncAt.toISOString(), stale: false },
       orders: { lastSyncAt: ordersLastSyncAt.toISOString(), stale: false },
-      webhooks: { failedLast24h: 3 },
+      webhooks: { failedLast24h: 3, stuck: 0, oldestStuckAt: null },
     });
     await app.close();
   });
@@ -78,6 +79,17 @@ describe("GET /health", () => {
       expect(res.json().orders.stale).toBe(true);
       await app.close();
     }
+  });
+
+  it("reports stuck webhooks as a warning field, still 200", async () => {
+    const oldest = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const { app } = setup({
+      details: async () => ({ lastSyncAt: new Date(), failedWebhooks24h: 0, stuckWebhooks: 4, oldestStuckWebhookAt: oldest }),
+    });
+    const res = await app.inject({ method: "GET", url: "/health" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().webhooks).toEqual({ failedLast24h: 0, stuck: 4, oldestStuckAt: oldest.toISOString() });
+    await app.close();
   });
 
   it("is 503 only when the database is down", async () => {
@@ -105,6 +117,7 @@ describe("GET /health", () => {
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json().webhooks.failedLast24h).toBeNull();
+    expect(res.json().webhooks.stuck).toBeNull();
     await app.close();
   });
 
@@ -246,5 +259,28 @@ describe("Sentry scrubbing", () => {
     expect(event.request.url).toBe("https://api.example/v1/catalog");
     expect(event).not.toHaveProperty("user");
     expect(scrubText("ok short words")).toBe("ok short words");
+  });
+});
+
+describe("debug route flag", () => {
+  it("GET /v1/debug/sentry is off unless enabled", async () => {
+    const app = buildApp({
+      serviceToken: TOKEN,
+      customers: fakeCustomers(),
+      favourites: fakeFavourites(),
+      webhooks: fakeWebhooks().deps,
+      pingDb: async () => {},
+      logger: false,
+    });
+    const res = await app.inject({ method: "GET", url: "/v1/debug/sentry", headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("SENTRY_DEBUG=1 turns it on; anything else leaves it off", () => {
+    const base = { DATABASE_URL: "postgres://x/y", BACKEND_SERVICE_TOKEN: TOKEN };
+    expect(readEnv(base).debugRoutes).toBe(false);
+    expect(readEnv({ ...base, SENTRY_DEBUG: "true" }).debugRoutes).toBe(false);
+    expect(readEnv({ ...base, SENTRY_DEBUG: "1" }).debugRoutes).toBe(true);
   });
 });

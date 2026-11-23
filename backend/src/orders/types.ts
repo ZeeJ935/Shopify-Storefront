@@ -39,8 +39,9 @@ export type OrdersSource = {
     updatedSince: string,
   ): Promise<{ orders: RemoteOrder[]; endCursor: string | null; hasNextPage: boolean }>;
   /**
-   * Single order with all line pages. Returns null when missing or outside the
-   * read_orders window (ACCESS_DENIED / not found) so webhooks can skip without retry.
+   * Single order with all line pages. Returns null when Admin returns no order, or
+   * refuses it with the ACCESS_DENIED code (outside the read_orders window), so webhooks
+   * can skip without retry. Any other error is thrown.
    */
   order(id: string): Promise<RemoteOrder | null>;
 };

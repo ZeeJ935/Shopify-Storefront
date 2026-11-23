@@ -8,6 +8,8 @@ export type OrdersHandlerDeps = {
   store: OrdersStore;
   /** Log topic + id when an old/inaccessible order is skipped (no PII). */
   logSkip?: (line: { topic: string; id: string | number | null; handler: string }) => void;
+  /** Called after an upsert that needs fulfillment data refreshed (see UpsertOrderResult). */
+  onOrderChanged?: (orderShopifyId: string) => Promise<unknown>;
 };
 
 function orderIdFromPayload(payload: unknown): string | number | null {
@@ -31,7 +33,8 @@ export function createOrdersHandlers(deps: OrdersHandlerDeps): WebhookHandler {
         deps.logSkip?.({ topic: event.topic, id, handler: "orders" });
         return;
       }
-      await deps.store.upsertOrder(remote);
+      const result = await deps.store.upsertOrder(remote);
+      if (result.refreshFulfillments) await deps.onOrderChanged?.(remote.shopifyId);
     },
   };
 }

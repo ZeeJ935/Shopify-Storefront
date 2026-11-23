@@ -15,8 +15,12 @@ export type FullSyncResult = {
   deletedLevels: number;
 };
 
-/** Pages locations then items/levels; deletes missing rows only after a complete read. */
+/**
+ * Pages locations then items/levels; deletes missing rows only after a complete read,
+ * and only rows not written since the sync started (webhook writes during it survive).
+ */
 export async function fullSync(deps: InventorySyncDeps): Promise<FullSyncResult> {
+  const startedAt = await deps.store.beginFullSync();
   const seenLocations = new Set<string>();
   const seenItems = new Set<string>();
   const seenLevels = new Set<string>();
@@ -66,7 +70,7 @@ export async function fullSync(deps: InventorySyncDeps): Promise<FullSyncResult>
     locationIds: seenLocations,
     itemIds: seenItems,
     levelKeys: seenLevels,
-  });
+  }, startedAt);
 
   return {
     locations: locationCount,

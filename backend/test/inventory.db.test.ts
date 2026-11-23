@@ -39,6 +39,41 @@ function sourceFrom(data: { locations: RemoteLocation[]; items: RemoteInventoryI
   };
 }
 
+/**
+ * Runs `competing` in an open transaction on its own connection, starts `call` (which
+ * then blocks on the row lock), waits until it is really waiting, and commits.
+ */
+async function raceAgainstUncommittedInsert<T>(
+  pool: pg.Pool,
+  admin: pg.Pool,
+  dbName: string,
+  competing: (client: pg.PoolClient) => Promise<void>,
+  call: () => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await competing(client);
+    const pending = call();
+    for (let i = 0; ; i++) {
+      const { rows } = await admin.query<{ c: number }>(
+        "select count(*)::int as c from pg_stat_activity where datname = $1 and wait_event_type = 'Lock'",
+        [dbName],
+      );
+      if (rows[0].c > 0) break;
+      if (i > 200) throw new Error("call never blocked on the competing insert");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await client.query("commit");
+    return await pending;
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 describe.skipIf(!url)("inventory in Postgres", () => {
   const dbName = `inventory_test_${randomUUID().slice(0, 8)}`;
   const admin = new pg.Pool({ connectionString: url, max: 1 });
@@ -128,6 +163,73 @@ describe.skipIf(!url)("inventory in Postgres", () => {
 
     const levels = await pool.query("select count(*)::int as c from inventory_levels");
     expect(levels.rows[0].c).toBe(0);
+  });
+
+  it("race: a concurrent newer level is not overwritten by an older upsert (no history)", async () => {
+    const loc = "gid://shopify/Location/900";
+    const item = "gid://shopify/InventoryItem/9000";
+    const locId = await store.upsertLocation({ shopifyId: loc, name: "Race", active: true, fulfillsOnlineOrders: true, updatedAt: null });
+    const itemId = await store.upsertItem({ shopifyId: item, variantId: null, productId: null, sku: "RACE", tracked: true, updatedAt: null });
+    const upsertOlder = (available: number, at: string) =>
+      store.upsertLevel({
+        itemId,
+        locationId: locId,
+        itemShopifyId: item,
+        locationShopifyId: loc,
+        level: { locationShopifyId: loc, available, onHand: available, committed: 0, incoming: 0, shopifyUpdatedAt: at },
+        source: "sync",
+      });
+
+    const result = await raceAgainstUncommittedInsert(
+      pool,
+      admin,
+      dbName,
+      async (c) => {
+        await c.query(
+          `insert into inventory_levels (inventory_item_id, location_id, available, shopify_updated_at)
+           values ($1, $2, 7, '2026-03-02T00:00:00Z')`,
+          [itemId, locId],
+        );
+      },
+      () => upsertOlder(3, "2026-03-01T00:00:00Z"),
+    );
+    expect(result).toEqual({ applied: false, availableChanged: false });
+    const lvl = await pool.query("select available from inventory_levels where inventory_item_id = $1 and location_id = $2", [itemId, locId]);
+    expect(lvl.rows[0].available).toBe(7);
+    const hist = await pool.query("select count(*)::int as c from inventory_level_history where item_shopify_id = $1", [item]);
+    expect(hist.rows[0].c).toBe(0);
+  });
+
+  it("race: a newer level upsert still wins over a concurrent older insert", async () => {
+    const loc = "gid://shopify/Location/901";
+    const item = "gid://shopify/InventoryItem/9001";
+    const locId = await store.upsertLocation({ shopifyId: loc, name: "Race 2", active: true, fulfillsOnlineOrders: true, updatedAt: null });
+    const itemId = await store.upsertItem({ shopifyId: item, variantId: null, productId: null, sku: "RACE2", tracked: true, updatedAt: null });
+
+    const result = await raceAgainstUncommittedInsert(
+      pool,
+      admin,
+      dbName,
+      async (c) => {
+        await c.query(
+          `insert into inventory_levels (inventory_item_id, location_id, available, shopify_updated_at)
+           values ($1, $2, 7, '2026-03-01T00:00:00Z')`,
+          [itemId, locId],
+        );
+      },
+      () =>
+        store.upsertLevel({
+          itemId,
+          locationId: locId,
+          itemShopifyId: item,
+          locationShopifyId: loc,
+          level: { locationShopifyId: loc, available: 4, onHand: 4, committed: 0, incoming: 0, shopifyUpdatedAt: "2026-03-02T00:00:00Z" },
+          source: "webhook",
+        }),
+    );
+    expect(result.applied).toBe(true);
+    const lvl = await pool.query("select available from inventory_levels where inventory_item_id = $1 and location_id = $2", [itemId, locId]);
+    expect(lvl.rows[0].available).toBe(4);
   });
 
   it("lists locations/levels with filters and keyset cursor", async () => {
@@ -280,5 +382,57 @@ describe.skipIf(!url)("inventory in Postgres", () => {
     );
     expect(row.rows[0].available).toBe(50);
     expect(levelKey(ITEM, LOC)).toContain("|");
+  });
+
+  it("full sync keeps rows a webhook wrote mid-sync, still deletes stale unseen rows", async () => {
+    await pool.query("truncate inventory_level_history, inventory_levels, inventory_items, locations, inventory_state restart identity");
+    const STALE = "gid://shopify/InventoryItem/7000";
+    const FRESH = "gid://shopify/InventoryItem/7001";
+    const level = (available: number) => ({ locationShopifyId: LOC, available, onHand: available, committed: 0, incoming: 0, shopifyUpdatedAt: null });
+
+    // Before the sync: a row Shopify no longer has (never seen by the sync below).
+    const locId = await store.upsertLocation({ shopifyId: LOC, name: "Main", active: true, fulfillsOnlineOrders: true, updatedAt: null });
+    const staleId = await store.upsertItem({ shopifyId: STALE, variantId: null, productId: null, sku: "OLD", tracked: true, updatedAt: null });
+    await store.upsertLevel({ itemId: staleId, locationId: locId, itemShopifyId: STALE, locationShopifyId: LOC, level: level(1), source: "sync" });
+    // Make sure "before the sync" is strictly earlier than the sync start.
+    await pool.query("update inventory_items set synced_at = now() - interval '1 minute'");
+    await pool.query("update inventory_levels set synced_at = now() - interval '1 minute'");
+
+    const items: RemoteInventoryItem[] = Array.from({ length: 51 }, (_, i) => ({
+      shopifyId: `gid://shopify/InventoryItem/${8000 + i}`,
+      variantId: null,
+      productId: null,
+      sku: `S${i}`,
+      tracked: true,
+      updatedAt: null,
+      levels: [level(5)],
+    }));
+    const base = sourceFrom({
+      locations: [{ shopifyId: LOC, name: "Main", active: true, fulfillsOnlineOrders: true, updatedAt: null }],
+      items,
+    });
+    const source: InventorySource = {
+      ...base,
+      async inventoryItemsPage(after) {
+        if (after) {
+          // Webhook lands while the sync is on page 2 (page 1 already read).
+          const freshId = await store.upsertItem({ shopifyId: FRESH, variantId: null, productId: null, sku: "NEW", tracked: true, updatedAt: null });
+          await store.upsertLevel({ itemId: freshId, locationId: locId, itemShopifyId: FRESH, locationShopifyId: LOC, level: level(9), source: "webhook" });
+        }
+        return base.inventoryItemsPage(after);
+      },
+    };
+
+    const result = await fullSync({ source, store });
+    expect(result.deletedItems).toBe(1);
+    expect(result.deletedLevels).toBe(1);
+
+    const skus = await pool.query<{ sku: string }>("select sku from inventory_items where sku in ('OLD', 'NEW') order by sku");
+    expect(skus.rows.map((r) => r.sku)).toEqual(["NEW"]);
+    const fresh = await pool.query(
+      "select lvl.available from inventory_levels lvl join inventory_items ii on ii.id = lvl.inventory_item_id where ii.shopify_id = $1",
+      [FRESH],
+    );
+    expect(fresh.rows[0].available).toBe(9);
   });
 });

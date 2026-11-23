@@ -10,9 +10,36 @@ export const STRIPPED_PAYLOAD_TOPICS: ReadonlySet<string> = new Set([
   "orders/paid",
   "orders/updated",
   "orders/cancelled",
-  "fulfillments/create",
-  "fulfillments/update",
 ]);
+
+/** fulfillments/*: keep `{ id, order_id }` (order id is needed to re-fetch; not personal data). */
+const FULFILLMENT_TOPICS: ReadonlySet<string> = new Set(["fulfillments/create", "fulfillments/update"]);
+
+const FULFILLMENT_ORDER_GID = /^gid:\/\/shopify\/FulfillmentOrder\/\d+$/;
+const MAX_FULFILLMENT_ORDER_IDS = 20;
+
+/**
+ * fulfillment_orders/* payloads nest ids (`fulfillment_order`, `original_fulfillment_order`,
+ * `moved_fulfillment_order`, `fulfillment_order_merges[]`, ...). Collect only the
+ * FulfillmentOrder GIDs; nothing else is kept.
+ */
+export function fulfillmentOrderIdsFromPayload(payload: unknown): string[] {
+  const found = new Set<string>();
+  const visit = (value: unknown, depth: number) => {
+    if (found.size >= MAX_FULFILLMENT_ORDER_IDS || depth > 6 || value == null) return;
+    if (typeof value === "string") {
+      if (FULFILLMENT_ORDER_GID.test(value)) found.add(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const v of value) visit(v, depth + 1);
+      return;
+    }
+    if (typeof value === "object") for (const v of Object.values(value)) visit(v, depth + 1);
+  };
+  visit(payload, 0);
+  return [...found];
+}
 
 function isFulfillmentOrderTopic(topic: string): boolean {
   return topic.startsWith("fulfillment_orders/");
@@ -29,13 +56,20 @@ export function resourceIdFromPayload(payload: unknown): string | number | null 
 
 /**
  * What to persist on webhook_events.
- * Catalog: full payload (as today). Handled non-catalog: `{ id }` only. Unknown: null.
+ * Catalog: full payload. Inventory/location/order topics: `{ id }`. fulfillments/*:
+ * `{ id, order_id }`. fulfillment_orders/*: `{ ids }` (FulfillmentOrder GIDs). Unknown: null.
  */
 export function payloadForStorage(topic: string, payload: unknown, handled: boolean): unknown {
   if (!handled) return null;
   if (CATALOG_TOPICS.has(topic)) return payload;
-  if (STRIPPED_PAYLOAD_TOPICS.has(topic) || isFulfillmentOrderTopic(topic)) {
-    return { id: resourceIdFromPayload(payload) };
+  if (STRIPPED_PAYLOAD_TOPICS.has(topic)) return { id: resourceIdFromPayload(payload) };
+  if (FULFILLMENT_TOPICS.has(topic)) {
+    const orderId = payload && typeof payload === "object" ? (payload as Record<string, unknown>).order_id : null;
+    return {
+      id: resourceIdFromPayload(payload),
+      order_id: typeof orderId === "number" || typeof orderId === "string" ? orderId : null,
+    };
   }
+  if (isFulfillmentOrderTopic(topic)) return { ids: fulfillmentOrderIdsFromPayload(payload) };
   return null;
 }

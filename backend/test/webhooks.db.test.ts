@@ -53,6 +53,19 @@ describe.skipIf(!url)("webhooks (Postgres + pg-boss)", () => {
     await db.close();
   });
 
+  it("requeue (stuck recovery) queues one job per event within the singleton window", async () => {
+    const { eventId } = await intake({ webhookId: wid(900), topic: "customers/update", shopDomain: "s", payload: null, handled: false });
+    const before = await jobs();
+    await queue.requeue(eventId!);
+    await queue.requeue(eventId!);
+    const { rows } = await db.pool.query("select count(*)::int as c from pgboss.job where name = $1 and data->>'eventId' = $2", [
+      queue.name,
+      String(eventId),
+    ]);
+    expect(rows[0].c).toBe(1);
+    expect(await jobs()).toBe(before + 1);
+  });
+
   it("stores and queues once; a duplicate webhook ID is dropped", async () => {
     const event = { webhookId: wid(1), topic: "customers/update", shopDomain: "s", payload: null, handled: false };
     expect((await intake(event)).duplicate).toBe(false);

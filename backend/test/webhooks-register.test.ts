@@ -163,6 +163,6 @@ describe("syncWebhookSubscriptions", () => {
     // Catalog topics must not be in the default register list.
     expect(APP_REGISTER_TOPICS).not.toContain("products/update");
     expect(APP_REGISTER_TOPICS).not.toContain("inventory_levels/update");
-    expect(APP_REGISTER_TOPICS).not.toContain("fulfillments/create");
+    expect(APP_REGISTER_TOPICS).toContain("fulfillments/create");
   });
 });

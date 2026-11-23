@@ -50,6 +50,20 @@
       "when": 1795370000000,
       "tag": "0006_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795440740598,
+      "tag": "0007_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795441180316,
+      "tag": "0008_fulfillments",
+      "breakpoints": true
     }
   ]
 }

@@ -25,8 +25,16 @@ export type InventoryStore = {
     source: "webhook" | "sync";
   }): Promise<UpsertLevelResult>;
   deleteLocationByShopifyId(shopifyId: string): Promise<void>;
-  /** After a complete sync: drop rows not seen; set last_full_sync_at. */
-  finishFullSync(seen: { locationIds: Set<string>; itemIds: Set<string>; levelKeys: Set<string> }): Promise<{
+  /** Database clock at the start of a full sync; pass it to finishFullSync. */
+  beginFullSync(): Promise<Date>;
+  /**
+   * After a complete sync: drop rows not seen AND not written since `startedAt`
+   * (so rows a webhook wrote during the sync survive); set last_full_sync_at.
+   */
+  finishFullSync(
+    seen: { locationIds: Set<string>; itemIds: Set<string>; levelKeys: Set<string> },
+    startedAt: Date,
+  ): Promise<{
     deletedLocations: number;
     deletedItems: number;
     deletedLevels: number;
@@ -126,7 +134,7 @@ export function createInventoryStore(pool: pg.Pool): InventoryStore {
         const before = row?.available ?? available;
         const availableChanged = !row || before !== available;
 
-        await client.query(
+        const upserted = await client.query(
           `insert into inventory_levels (
              inventory_item_id, location_id, available, on_hand, committed, incoming, shopify_updated_at, synced_at
            ) values ($1, $2, $3, $4, $5, $6, $7::timestamptz, now())
@@ -136,9 +144,20 @@ export function createInventoryStore(pool: pg.Pool): InventoryStore {
              committed = excluded.committed,
              incoming = excluded.incoming,
              shopify_updated_at = excluded.shopify_updated_at,
-             synced_at = now()`,
+             synced_at = now()
+           -- Same rule as shouldApply. Covers the race where both writers saw no row
+           -- (FOR UPDATE above locks nothing then) and this insert hit the conflict.
+           where inventory_levels.shopify_updated_at is null or excluded.shopify_updated_at is null
+              or excluded.shopify_updated_at >= inventory_levels.shopify_updated_at
+           returning id`,
           [itemId, locationId, available, qty(level.onHand), qty(level.committed), qty(level.incoming), level.shopifyUpdatedAt],
         );
+
+        if (upserted.rowCount === 0) {
+          // A newer level was committed concurrently: keep it, write no history.
+          await client.query("commit");
+          return { applied: false, availableChanged: false };
+        }
 
         if (availableChanged && row) {
           await client.query(
@@ -167,7 +186,12 @@ export function createInventoryStore(pool: pg.Pool): InventoryStore {
       await pool.query("delete from locations where shopify_id = $1", [shopifyId]);
     },
 
-    async finishFullSync(seen) {
+    async beginFullSync() {
+      const { rows } = await pool.query<{ now: Date }>("select now() as now");
+      return rows[0].now;
+    },
+
+    async finishFullSync(seen, startedAt) {
       const client = await pool.connect();
       try {
         await client.query("begin");
@@ -176,11 +200,18 @@ export function createInventoryStore(pool: pg.Pool): InventoryStore {
           `delete from inventory_levels lvl
            using inventory_items ii, locations loc
            where lvl.inventory_item_id = ii.id and lvl.location_id = loc.id
-             and not (ii.shopify_id || '|' || loc.shopify_id = any($1::text[]))`,
-          [[...seen.levelKeys]],
+             and not (ii.shopify_id || '|' || loc.shopify_id = any($1::text[]))
+             and lvl.synced_at < $2`,
+          [[...seen.levelKeys], startedAt],
         );
-        const items = await client.query(`delete from inventory_items where not (shopify_id = any($1::text[]))`, [[...seen.itemIds]]);
-        const locs = await client.query(`delete from locations where not (shopify_id = any($1::text[]))`, [[...seen.locationIds]]);
+        const items = await client.query(
+          `delete from inventory_items where not (shopify_id = any($1::text[])) and synced_at < $2`,
+          [[...seen.itemIds], startedAt],
+        );
+        const locs = await client.query(
+          `delete from locations where not (shopify_id = any($1::text[])) and synced_at < $2`,
+          [[...seen.locationIds], startedAt],
+        );
         await client.query(
           `insert into inventory_state (id, last_full_sync_at) values (1, now())
            on conflict (id) do update set last_full_sync_at = excluded.last_full_sync_at`,

@@ -19,6 +19,8 @@ export type Env = {
   shopifyAdminApiVersion: string;
   /** Public backend origin for app webhook subscriptions (no trailing slash). Optional at API start. */
   backendPublicUrl?: string;
+  /** GET /v1/debug/sentry (throws on purpose). Only when SENTRY_DEBUG=1. */
+  debugRoutes: boolean;
 };
 
 /** Reads and validates the service's environment. Throws with a clear message when something is missing. */
@@ -64,5 +66,6 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     shopifyAdminClientSecret: source.SHOPIFY_ADMIN_CLIENT_SECRET?.trim() || undefined,
     shopifyAdminApiVersion,
     backendPublicUrl,
+    debugRoutes: source.SENTRY_DEBUG?.trim() === "1",
   };
 }

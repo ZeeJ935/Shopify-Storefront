@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { createShopifyAdmin, ShopifyUserErrors } from "../src/shopify-admin/index.js";
+import { createShopifyAdmin, ShopifyGraphqlError, ShopifyUserErrors } from "../src/shopify-admin/index.js";
 import { createTokenCache, TOKEN_REFRESH_SKEW_MS } from "../src/shopify-admin/token.js";
 
 const CLIENT_ID = "admin-client-id";
@@ -265,6 +265,105 @@ describe("Shopify Admin GraphQL client", () => {
     expect(data.shop.name).toBe("Ok");
     expect(sleeps.length).toBeGreaterThanOrEqual(2);
     expect(fake.graphqlPosts).toBe(3);
+  });
+
+  it("retries a THROTTLED GraphQL response (HTTP 200) and waits for the bucket", async () => {
+    const sleeps: number[] = [];
+    fake = await listenFake({
+      onGraphql: ({ n }) =>
+        n === 1
+          ? {
+              status: 200,
+              json: {
+                errors: [{ message: "Throttled", extensions: { code: "THROTTLED" } }],
+                extensions: {
+                  cost: { requestedQueryCost: 300, throttleStatus: { maximumAvailable: 2000, currentlyAvailable: 100, restoreRate: 100 } },
+                },
+              },
+            }
+          : { status: 200, json: { data: { shop: { name: "Ok" } } } },
+    });
+    const admin = createShopifyAdmin({
+      storeDomain: "test.myshopify.com",
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      origin: fake.origin,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    const data = await admin.request<{ shop: { name: string } }>(`{ shop { name } }`);
+    expect(data.shop.name).toBe("Ok");
+    expect(fake.graphqlPosts).toBe(2);
+    // (300 - 100) / 100 per second = 2s
+    expect(sleeps).toContain(2000);
+  });
+
+  it("gives up on THROTTLED after maxRetries with a ShopifyGraphqlError", async () => {
+    fake = await listenFake({
+      onGraphql: () => ({ status: 200, json: { errors: [{ message: "Throttled", extensions: { code: "THROTTLED" } }] } }),
+    });
+    const admin = createShopifyAdmin({
+      storeDomain: "test.myshopify.com",
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      origin: fake.origin,
+      sleep: async () => {},
+    });
+
+    const error = await admin.request(`{ shop { name } }`).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ShopifyGraphqlError);
+    expect((error as ShopifyGraphqlError).codes).toEqual(["THROTTLED"]);
+    expect(fake.graphqlPosts).toBe(5); // first try + 4 retries
+  });
+
+  it("retries a network error and then succeeds", async () => {
+    fake = await listenFake({});
+    let graphqlCalls = 0;
+    const flakyFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/graphql.json") && ++graphqlCalls === 1) throw new TypeError("fetch failed");
+      return fetch(input, init);
+    };
+    const sleeps: number[] = [];
+    const admin = createShopifyAdmin({
+      storeDomain: "test.myshopify.com",
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      origin: fake.origin,
+      fetch: flakyFetch,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    const data = await admin.request<{ shop: { name: string } }>(`{ shop { name } }`);
+    expect(data.shop.name).toBe("ZJ Test Shop");
+    expect(graphqlCalls).toBe(2);
+    expect(sleeps.length).toBe(1);
+  });
+
+  it("throws ShopifyGraphqlError with codes for non-retryable errors (no retry)", async () => {
+    fake = await listenFake({
+      onGraphql: () => ({
+        status: 200,
+        json: { data: { order: null }, errors: [{ message: "Access denied for order field.", extensions: { code: "ACCESS_DENIED" } }] },
+      }),
+    });
+    const admin = createShopifyAdmin({
+      storeDomain: "test.myshopify.com",
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      origin: fake.origin,
+      sleep: async () => {},
+    });
+
+    const error = await admin.request(`{ order(id: "gid://shopify/Order/1") { id } }`).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ShopifyGraphqlError);
+    expect((error as ShopifyGraphqlError).codes).toEqual(["ACCESS_DENIED"]);
+    expect(String((error as Error).message)).not.toContain(ACCESS_TOKEN);
+    expect(fake.graphqlPosts).toBe(1);
   });
 
   it("surfaces userErrors without leaking secrets", async () => {

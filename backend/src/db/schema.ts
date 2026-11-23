@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, bigserial, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, unique } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * One row per Shopify customer the storefront has sent us.
@@ -36,8 +36,9 @@ export const favourites = pgTable(
 
 /**
  * Every Shopify webhook we accepted (valid signature), once per webhook ID.
- * Catalog topics are processed by the queue; other topics are only recorded,
- * without their payload, so customer or order data is never stored by accident.
+ * Topics with a handler are processed by the queue. Payload: catalog topics keep
+ * the body; inventory/location/order/fulfillment topics keep `{ id }` only; topics
+ * without a handler keep null — so customer or order data is never stored by accident.
  */
 export const webhookEvents = pgTable(
   "webhook_events",
@@ -58,7 +59,11 @@ export const webhookEvents = pgTable(
     /** X-Shopify-Api-Version on the delivery (nullable for older rows). */
     apiVersion: text("api_version"),
   },
-  (t) => [index("webhook_events_pending_idx").on(t.processedAt, t.failedAt)],
+  (t) => [
+    index("webhook_events_pending_idx").on(t.processedAt, t.failedAt),
+    // Retention purge and age-based health checks.
+    index("webhook_events_received_at_idx").on(t.receivedAt),
+  ],
 );
 
 /**
@@ -184,7 +189,8 @@ export const inventoryLevels = pgTable(
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    unique("inventory_levels_item_location_unique").on(t.inventoryItemId, t.locationId),
+    // A unique index (not a constraint) — that is what migration 0005 created.
+    uniqueIndex("inventory_levels_item_location_unique").on(t.inventoryItemId, t.locationId),
     index("inventory_levels_location_idx").on(t.locationId),
     index("inventory_levels_item_idx").on(t.inventoryItemId),
   ],
@@ -211,7 +217,8 @@ export const inventoryLevelHistory = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("inventory_level_history_item_idx").on(t.itemShopifyId),
+    // Item detail: history for one item, newest first (plain DESC = NULLS FIRST).
+    index("inventory_level_history_item_created_idx").on(t.itemShopifyId, t.createdAt.desc().nullsFirst()),
     index("inventory_level_history_created_idx").on(t.createdAt),
   ],
 );
@@ -248,10 +255,13 @@ export const orders = pgTable(
     sourceName: text("source_name"),
     test: boolean("test").notNull().default(false),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Last time fulfillment orders + fulfillments were refreshed for this order; null = never. */
+    fulfillmentsSyncedAt: timestamp("fulfillments_synced_at", { withTimezone: true }),
   },
   (t) => [
     index("orders_updated_at_idx").on(t.updatedAt),
-    index("orders_created_at_idx").on(t.createdAt),
+    // Matches the list ORDER BY exactly (plain DESC = NULLS FIRST in Postgres).
+    index("orders_created_at_shopify_id_idx").on(t.createdAt.desc().nullsLast(), t.shopifyId.desc().nullsFirst()),
     index("orders_financial_status_idx").on(t.financialStatus),
     index("orders_fulfillment_status_idx").on(t.fulfillmentStatus),
   ],
@@ -277,7 +287,13 @@ export const orderLines = pgTable(
     discountedTotal: numeric("discounted_total"),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("order_lines_order_idx").on(t.orderId), index("order_lines_sku_idx").on(t.sku)],
+  (t) => [
+    index("order_lines_order_idx").on(t.orderId),
+    index("order_lines_sku_idx").on(t.sku),
+    // Fulfillment and stock lookups by variant / inventory item.
+    index("order_lines_inventory_item_idx").on(t.inventoryItemId),
+    index("order_lines_variant_idx").on(t.variantId),
+  ],
 );
 
 /** One row: when the last orders full sync finished. */
@@ -285,3 +301,99 @@ export const ordersState = pgTable("orders_state", {
   id: integer("id").primaryKey().default(1),
   lastFullSyncAt: timestamp("last_full_sync_at", { withTimezone: true }),
 });
+
+/**
+ * Shopify fulfillment orders (Admin API). No destination, delivery address or contact
+ * fields are requested or stored — staff fetch those live from Shopify.
+ */
+export const fulfillmentOrders = pgTable(
+  "fulfillment_orders",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    shopifyId: text("shopify_id").notNull().unique(),
+    orderId: bigint("order_id", { mode: "number" })
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    requestStatus: text("request_status"),
+    assignedLocationShopifyId: text("assigned_location_shopify_id"),
+    fulfillAt: timestamp("fulfill_at", { withTimezone: true }),
+    shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("fulfillment_orders_order_idx").on(t.orderId),
+    index("fulfillment_orders_status_idx").on(t.status),
+    index("fulfillment_orders_location_idx").on(t.assignedLocationShopifyId),
+  ],
+);
+
+/** Lines of a fulfillment order. Cascades with the fulfillment order. */
+export const fulfillmentOrderLines = pgTable(
+  "fulfillment_order_lines",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    fulfillmentOrderId: bigint("fulfillment_order_id", { mode: "number" })
+      .notNull()
+      .references(() => fulfillmentOrders.id, { onDelete: "cascade" }),
+    shopifyId: text("shopify_id").notNull().unique(),
+    /** order_lines.shopify_id (LineItem GID). */
+    orderLineShopifyId: text("order_line_shopify_id"),
+    inventoryItemId: text("inventory_item_id"),
+    totalQuantity: integer("total_quantity").notNull().default(0),
+    remainingQuantity: integer("remaining_quantity").notNull().default(0),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("fulfillment_order_lines_fo_idx").on(t.fulfillmentOrderId),
+    index("fulfillment_order_lines_order_line_idx").on(t.orderLineShopifyId),
+  ],
+);
+
+/** Fulfillments (shipments) of an order, with the first tracking entry. Cascades with the order. */
+export const fulfillments = pgTable(
+  "fulfillments",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    shopifyId: text("shopify_id").notNull().unique(),
+    orderId: bigint("order_id", { mode: "number" })
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    trackingCompany: text("tracking_company"),
+    trackingNumber: text("tracking_number"),
+    trackingUrl: text("tracking_url"),
+    shopifyCreatedAt: timestamp("shopify_created_at", { withTimezone: true }),
+    shopifyUpdatedAt: timestamp("shopify_updated_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("fulfillments_order_idx").on(t.orderId)],
+);
+
+/**
+ * Fulfillment requests made through this API (POST /v1/fulfillments): one row per
+ * idempotency key, so a retried request never fulfills twice. `request` holds lines,
+ * tracking and notify flag only — never addresses or contact details.
+ */
+export const fulfillmentActions = pgTable(
+  "fulfillment_actions",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    kind: text("kind").notNull(),
+    fulfillmentOrderShopifyId: text("fulfillment_order_shopify_id").notNull(),
+    request: jsonb("request").notNull(),
+    dryRun: boolean("dry_run").notNull().default(false),
+    /** pending | submitting (Shopify call may have been sent) | succeeded | failed | dry_run */
+    status: text("status").notNull(),
+    shopifyFulfillmentId: text("shopify_fulfillment_id"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("fulfillment_actions_status_idx").on(t.status),
+    index("fulfillment_actions_fo_idx").on(t.fulfillmentOrderShopifyId),
+  ],
+);

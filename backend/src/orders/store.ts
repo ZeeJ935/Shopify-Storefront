@@ -2,7 +2,15 @@ import type pg from "pg";
 import { shouldApply } from "../webhooks/ordering.js";
 import type { RemoteOrder } from "./types.js";
 
-export type UpsertOrderResult = { applied: boolean };
+export type UpsertOrderResult = {
+  applied: boolean;
+  /**
+   * True when the order's fulfillment data should be re-fetched: the order is new, its
+   * updated_at changed, or its fulfillments were never synced. Lets the nightly sync skip
+   * unchanged orders.
+   */
+  refreshFulfillments?: boolean;
+};
 
 export type OrdersStore = {
   countOrders(): Promise<number>;
@@ -27,8 +35,8 @@ export function createOrdersStore(pool: pg.Pool): OrdersStore {
       const client = await pool.connect();
       try {
         await client.query("begin");
-        const existing = await client.query<{ updated_at: Date | null }>(
-          `select updated_at from orders where shopify_id = $1 for update`,
+        const existing = await client.query<{ updated_at: Date | null; fulfillments_synced_at: Date | null }>(
+          `select updated_at, fulfillments_synced_at from orders where shopify_id = $1 for update`,
           [order.shopifyId],
         );
         const row = existing.rows[0];
@@ -64,6 +72,10 @@ export function createOrdersStore(pool: pg.Pool): OrdersStore {
              source_name = excluded.source_name,
              test = excluded.test,
              synced_at = now()
+           -- Same rule as shouldApply. Covers the race where both writers saw no row
+           -- (FOR UPDATE above locks nothing then) and this insert hit the conflict.
+           where orders.updated_at is null or excluded.updated_at is null
+              or excluded.updated_at >= orders.updated_at
            returning id`,
           [
             order.shopifyId,
@@ -85,6 +97,11 @@ export function createOrdersStore(pool: pg.Pool): OrdersStore {
             order.test,
           ],
         );
+        if (upserted.rowCount === 0) {
+          // A newer version was committed concurrently: keep it and its lines.
+          await client.query("commit");
+          return { applied: false };
+        }
         const orderId = Number(upserted.rows[0].id);
         const seenLineIds: string[] = [];
 
@@ -133,7 +150,10 @@ export function createOrdersStore(pool: pg.Pool): OrdersStore {
         }
 
         await client.query("commit");
-        return { applied: true };
+        const incoming = order.updatedAt ? Date.parse(order.updatedAt) : NaN;
+        const refreshFulfillments =
+          !row || !row.fulfillments_synced_at || row.updated_at?.getTime() !== incoming;
+        return { applied: true, refreshFulfillments };
       } catch (error) {
         await client.query("rollback").catch(() => {});
         throw error;

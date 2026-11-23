@@ -36,15 +36,15 @@ export function createPlaceholderHandler(log: PlaceholderLog = () => {}): Webhoo
 export function registerPlaceholders(
   router: TopicRouter,
   log?: PlaceholderLog,
-  opts?: { skipLocationAndItem?: boolean; skipOrders?: boolean },
+  opts?: { skipLocationAndItem?: boolean; skipOrders?: boolean; skipFulfillments?: boolean },
 ): void {
   const handler = createPlaceholderHandler(log);
   const topics: string[] = [];
   if (!opts?.skipLocationAndItem) topics.push(...LOCATION_AND_ITEM_PLACEHOLDERS);
   if (!opts?.skipOrders) topics.push(...ORDER_PLACEHOLDERS);
-  topics.push(...FULFILLMENT_PLACEHOLDERS);
+  if (!opts?.skipFulfillments) topics.push(...FULFILLMENT_PLACEHOLDERS);
   for (const topic of topics) {
     router.register(topic, handler);
   }
-  router.registerPrefix("fulfillment_orders/", handler);
+  if (!opts?.skipFulfillments) router.registerPrefix("fulfillment_orders/", handler);
 }

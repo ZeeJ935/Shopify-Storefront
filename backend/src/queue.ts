@@ -43,6 +43,13 @@ export function createWebhookQueue(
     async enqueueOnClient(client: pg.PoolClient, eventId: number) {
       await boss.send(name, { eventId }, { db: { executeSql: (text, values) => client.query(text, values) } });
     },
+    /**
+     * Queues a stuck event again (maintenance). The per-event singleton stops a second
+     * copy being queued within 15 minutes.
+     */
+    async requeue(eventId: number) {
+      await boss.send(name, { eventId }, { singletonKey: `webhook-${eventId}`, singletonSeconds: 15 * 60 });
+    },
     stop: () => boss.stop({ graceful: true, timeout: 10_000 }),
     /** For tests: removes the queue and its jobs. */
     deleteQueue: () => boss.deleteQueue(name),

@@ -16,6 +16,8 @@ export type BuildRegistryOpts = {
   };
   /** Orders handler (Admin-backed). When set, replace order placeholders. */
   orders?: WebhookHandler;
+  /** Fulfillment handlers (Admin-backed). When set, replace fulfillment placeholders. */
+  fulfillments?: { fulfillmentOrder: WebhookHandler; fulfillment: WebhookHandler };
   logPlaceholder?: PlaceholderLog;
 };
 
@@ -60,9 +62,16 @@ export function buildWebhookRegistry(opts: BuildRegistryOpts): TopicRouter {
     }
   }
 
+  if (opts.fulfillments) {
+    router.registerPrefix("fulfillment_orders/", opts.fulfillments.fulfillmentOrder);
+    router.register("fulfillments/create", opts.fulfillments.fulfillment);
+    router.register("fulfillments/update", opts.fulfillments.fulfillment);
+  }
+
   registerPlaceholders(router, opts.logPlaceholder, {
     skipLocationAndItem: Boolean(opts.inventory),
     skipOrders: Boolean(opts.orders),
+    skipFulfillments: Boolean(opts.fulfillments),
   });
   return router;
 }

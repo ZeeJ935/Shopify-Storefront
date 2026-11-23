@@ -2,7 +2,7 @@ import { createAdminClient, type AdminClient } from "./client.js";
 import { createAdminHealthCheck, type AdminApiHealth, type AdminHealthChecker } from "./health.js";
 import { createTokenCache, type CreateTokenCacheOpts } from "./token.js";
 
-export { ShopifyUserErrors } from "./client.js";
+export { ShopifyGraphqlError, ShopifyUserErrors } from "./client.js";
 export type { AdminApiHealth, AdminClient, AdminHealthChecker };
 
 /** Pinned Admin GraphQL API version used when SHOPIFY_ADMIN_API_VERSION is unset. */

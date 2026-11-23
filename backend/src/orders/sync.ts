@@ -7,6 +7,8 @@ export type OrdersSyncDeps = {
   store: OrdersStore;
   /** Override for tests. Default: now − 60 days. */
   updatedSince?: string;
+  /** Called after an upsert that needs fulfillment data refreshed (new/changed/never synced). */
+  onOrderChanged?: (orderShopifyId: string) => Promise<unknown>;
 };
 
 export type FullSyncResult = {
@@ -27,6 +29,7 @@ export async function fullSync(deps: OrdersSyncDeps): Promise<FullSyncResult> {
       orderCount++;
       const result = await deps.store.upsertOrder(order);
       if (result.applied) applied++;
+      if (result.refreshFulfillments) await deps.onOrderChanged?.(order.shopifyId);
     }
     if (!page.hasNextPage) break;
     after = page.endCursor;

@@ -106,6 +106,9 @@ function memoryStore() {
         if (key.endsWith(`|${shopifyId}`)) levels.delete(key);
       }
     },
+    async beginFullSync() {
+      return new Date();
+    },
     async finishFullSync(seen) {
       finished = seen;
       let deletedLevels = 0;

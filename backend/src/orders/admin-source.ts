@@ -1,4 +1,4 @@
-import type { ShopifyAdmin } from "../shopify-admin/index.js";
+import { ShopifyGraphqlError, type ShopifyAdmin } from "../shopify-admin/index.js";
 import type { OrdersSource, RemoteOrder, RemoteOrderLine } from "./types.js";
 
 export const ORDERS_PAGE = 50;
@@ -111,10 +111,13 @@ function mapOrderBase(node: Omit<OrderNode, "lineItems">, lines: RemoteOrderLine
   };
 }
 
-/** True when Admin refused an order outside the 60-day window (or it does not exist). */
+/**
+ * True only when Admin refused the order with the ACCESS_DENIED error code (e.g. outside
+ * the read_orders 60-day window). Matches codes, not message text, so schema errors,
+ * outages and exhausted THROTTLED retries are thrown and retried/reported instead.
+ */
 export function isOrderAccessError(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return /ACCESS_DENIED|access denied|not found|does not exist|unavailable/i.test(msg);
+  return error instanceof ShopifyGraphqlError && error.codes.includes("ACCESS_DENIED");
 }
 
 /**

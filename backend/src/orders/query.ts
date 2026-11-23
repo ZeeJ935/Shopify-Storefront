@@ -1,3 +1,4 @@
+import { getOrderFulfillments } from "../fulfillments/query.js";
 import type pg from "pg";
 import { toOrderGid } from "./ids.js";
 
@@ -212,8 +213,12 @@ export async function getOrderDetail(pool: pg.Pool, id: string) {
     [shopifyId],
   );
 
+  const { fulfillmentOrders, fulfillments } = await getOrderFulfillments(pool, shopifyId);
+
   return {
     ...mapOrder(order.rows[0]),
+    fulfillmentOrders,
+    fulfillments,
     lines: lines.rows.map((l) => ({
       id: l.shopify_id,
       variantId: l.variant_id,

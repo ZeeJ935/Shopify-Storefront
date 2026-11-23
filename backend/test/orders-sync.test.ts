@@ -6,7 +6,7 @@ import { createOrdersHandlers } from "../src/orders/handlers.js";
 import type { OrdersStore, UpsertOrderResult } from "../src/orders/store.js";
 import { fullSync } from "../src/orders/sync.js";
 import type { OrdersSource, RemoteOrder, RemoteOrderLine } from "../src/orders/types.js";
-import { createShopifyAdmin } from "../src/shopify-admin/index.js";
+import { createShopifyAdmin, ShopifyGraphqlError, type ShopifyAdmin } from "../src/shopify-admin/index.js";
 import { shouldApply } from "../src/webhooks/ordering.js";
 import { payloadForStorage } from "../src/webhooks/payload.js";
 import { processWebhookEvent } from "../src/webhooks/process.js";
@@ -187,7 +187,7 @@ describe("orders webhooks", () => {
   });
 
   it("skips null/access errors without throwing (no retry/Sentry)", async () => {
-    expect(isOrderAccessError(new Error("Shopify Admin API: ACCESS_DENIED"))).toBe(true);
+    expect(isOrderAccessError(new ShopifyGraphqlError([{ message: "Access denied", extensions: { code: "ACCESS_DENIED" } }]))).toBe(true);
     const { store } = memoryStore();
     const skips: { topic: string; id: string | number | null; handler: string }[] = [];
     const handler = createOrdersHandlers({
@@ -204,6 +204,37 @@ describe("orders webhooks", () => {
       }),
     ).resolves.toBeUndefined();
     expect(skips).toEqual([{ topic: "orders/updated", id: 999, handler: "orders" }]);
+  });
+
+  it("matches access errors by code only, never by message text", () => {
+    expect(isOrderAccessError(new Error("Shopify Admin API: ACCESS_DENIED"))).toBe(false);
+    expect(isOrderAccessError(new Error("Field 'x' not found on type 'Order'"))).toBe(false);
+    expect(isOrderAccessError(new Error("Service temporarily unavailable"))).toBe(false);
+    expect(isOrderAccessError(new ShopifyGraphqlError([{ message: "Throttled", extensions: { code: "THROTTLED" } }]))).toBe(false);
+    expect(isOrderAccessError(new ShopifyGraphqlError([{ message: "Order not found" }]))).toBe(false);
+  });
+
+  it("source.order: null for ACCESS_DENIED or a null order; throws other errors", async () => {
+    const adminThat = (request: () => Promise<unknown>) =>
+      createAdminOrdersSource({ request: request as ShopifyAdmin["request"], checkHealth: async () => ({ ok: true }) } as ShopifyAdmin);
+    const gid = "gid://shopify/Order/1";
+
+    await expect(
+      adminThat(async () => {
+        throw new ShopifyGraphqlError([{ message: "Access denied for order field.", extensions: { code: "ACCESS_DENIED" } }]);
+      }).order(gid),
+    ).resolves.toBeNull();
+    await expect(adminThat(async () => ({ order: null })).order(gid)).resolves.toBeNull();
+    await expect(
+      adminThat(async () => {
+        throw new Error("Shopify Admin API: Field 'displayFulfillmentStatus' not found");
+      }).order(gid),
+    ).rejects.toThrow(/not found/);
+    await expect(
+      adminThat(async () => {
+        throw new ShopifyGraphqlError([{ message: "Internal error", extensions: { code: "INTERNAL_SERVER_ERROR" } }]);
+      }).order(gid),
+    ).rejects.toBeInstanceOf(ShopifyGraphqlError);
   });
 
   it("stores only { id } for order webhook payloads", () => {

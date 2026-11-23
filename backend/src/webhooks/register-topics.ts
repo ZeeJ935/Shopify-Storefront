@@ -5,8 +5,8 @@
  * they are already subscribed manually in Shopify admin. App subscriptions cannot see
  * those, so registering them again would double-deliver every event.
  *
- * fulfillments/create|update are intentionally omitted until read_fulfillments is added;
- * placeholder handlers still exist in the router.
+ * fulfillments/create|update need the read_fulfillments scope (added in the app version
+ * that ships fulfillment sync); registration fails for them until it is approved.
  */
 export const APP_REGISTER_TOPICS = [
   "inventory_items/update",
@@ -17,6 +17,8 @@ export const APP_REGISTER_TOPICS = [
   "orders/paid",
   "orders/updated",
   "orders/cancelled",
+  "fulfillments/create",
+  "fulfillments/update",
   // Exact Shopify topic strings only — do not invent aliases if one is rejected.
   "fulfillment_orders/order_routing_complete",
   "fulfillment_orders/cancelled",

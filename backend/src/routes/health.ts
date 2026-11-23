@@ -11,6 +11,10 @@ export type HealthDetails = {
   ordersLastSyncAt?: Date | null;
   /** Webhook events that failed their last retry in the past 24 hours. */
   failedWebhooks24h: number;
+  /** Webhook events neither processed nor failed, received over STUCK_AFTER_MINUTES ago. */
+  stuckWebhooks?: number;
+  /** received_at of the oldest stuck event; null if none. */
+  oldestStuckWebhookAt?: Date | null;
 };
 
 /** A sync older than this is flagged as stale (nightly + slack for retries and sleep). */
@@ -73,7 +77,11 @@ export function healthRoutes(
         lastSyncAt: ordersLastSyncAt ? ordersLastSyncAt.toISOString() : null,
         stale: !ordersLastSyncAt || now() - ordersLastSyncAt.getTime() > STALE_AFTER_MS,
       },
-      webhooks: { failedLast24h: d ? d.failedWebhooks24h : null },
+      webhooks: {
+        failedLast24h: d ? d.failedWebhooks24h : null,
+        stuck: d ? (d.stuckWebhooks ?? 0) : null,
+        oldestStuckAt: d?.oldestStuckWebhookAt ? d.oldestStuckWebhookAt.toISOString() : null,
+      },
       ...(admin ? { adminApi: admin } : {}),
     };
   });
