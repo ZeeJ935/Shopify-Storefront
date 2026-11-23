@@ -43,3 +43,8 @@ next-env.d.ts
 
 # Walkthrough video toolkit (local only: recordings, voice files, saved logins)
 /video-kit/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/

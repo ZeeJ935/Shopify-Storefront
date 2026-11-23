@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
+import { cspHeaders } from "./lib/csp";
 
 const nextConfig: NextConfig = {
   experimental: {
@@ -24,9 +25,9 @@ const nextConfig: NextConfig = {
       },
     },
   },
-  // Low-risk hardening only. No Content-Security-Policy (out of scope) and no
-  // HSTS (Vercel's HTTPS domains already send it; it would also affect plain
-  // http in local `next start`).
+  // Security headers. The Content-Security-Policy is Report-Only until
+  // CSP_ENFORCE=1 (lib/csp.ts). No HSTS here: Vercel's HTTPS domains already
+  // send it, and it would also affect plain http in local `next start`.
   async headers() {
     return [
       {
@@ -37,8 +38,10 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
           },
+          // Report-Only until CSP_ENFORCE=1 (see lib/csp.ts and the README).
+          ...cspHeaders(process.env),
         ],
       },
     ];

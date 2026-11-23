@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   checks:
@@ -91,3 +92,97 @@ jobs:
 
       - name: Tests
         run: npm test
+
+  # Browser tests against a local production build, with a throwaway Postgres
+  # and a catalog synced from the real store. Pull requests and manual runs only;
+  # skipped (with a notice) when the Shopify secrets aren't available, e.g. on
+  # pull requests from forks. Never checks out, logs in or deletes anything.
+  e2e:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: zj
+          POSTGRES_PASSWORD: zj
+          POSTGRES_DB: zj_backend
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zj -d zj_backend"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN }}
+      SHOPIFY_STOREFRONT_ACCESS_TOKEN: ${{ secrets.SHOPIFY_STOREFRONT_ACCESS_TOKEN }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: ${{ secrets.SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID }}
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: ${{ secrets.SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET }}
+      SHOPIFY_CUSTOMER_ACCOUNT_SHOP_ID: ${{ secrets.SHOPIFY_CUSTOMER_ACCOUNT_SHOP_ID }}
+      SHOPIFY_CUSTOMER_ACCOUNT_CALLBACK_URL: ${{ secrets.SHOPIFY_CUSTOMER_ACCOUNT_CALLBACK_URL }}
+      SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET: ${{ secrets.SHOPIFY_CUSTOMER_ACCOUNT_SESSION_SECRET }}
+      # Local to this job only (not real secrets).
+      DATABASE_URL: postgres://zj:zj@127.0.0.1:5432/zj_backend
+      BACKEND_URL: http://127.0.0.1:4000
+      BACKEND_SERVICE_TOKEN: e2e-only-token-not-a-real-secret-0123456789
+      HOST: 127.0.0.1
+      PORT: "4000"
+    steps:
+      - name: Check secrets
+        id: check
+        run: |
+          if [ -z "$SHOPIFY_STORE_DOMAIN" ] || [ -z "$SHOPIFY_STOREFRONT_ACCESS_TOKEN" ]; then
+            echo "::notice::E2E tests skipped: Shopify secrets are not available to this run."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install
+        if: steps.check.outputs.skip != 'true'
+        run: npm ci && npm ci --prefix backend
+
+      - name: Backend (build, migrate, sync catalog from Shopify, start)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          npm --prefix backend run build
+          npm --prefix backend run db:migrate:prod
+          npm --prefix backend run catalog:backfill:prod
+          nohup npm --prefix backend start > backend.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:4000/health && break; sleep 1; done
+
+      - name: Install Chromium
+        if: steps.check.outputs.skip != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Build storefront
+        if: steps.check.outputs.skip != 'true'
+        run: npm run build
+
+      - name: E2E tests
+        if: steps.check.outputs.skip != 'true'
+        env:
+          E2E_REUSE: "1"
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: failure() && steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+            backend.log
+          retention-days: 7

@@ -56,6 +56,7 @@ Copy from `.env.example`. Never prefix Storefront, Customer Account or backend s
 | `NEXT_PUBLIC_SENTRY_DSN` | Optional. Sentry DSN for browser errors (usually the same value) |
 | `SENTRY_AUTH_TOKEN` · `SENTRY_ORG` · `SENTRY_PROJECT` | Optional. Upload source maps at build time for readable stack traces (all three needed) |
 | `SENTRY_DEBUG` | Local testing only: `1` enables `GET /api/debug/sentry`, which throws on purpose |
+| `CSP_ENFORCE` | Optional. `1` enforces the Content-Security-Policy instead of Report-Only (see Content-Security-Policy) |
 
 Full Admin steps (Headless channel, New customer accounts, favourites metafield): **[docs/customer-accounts-admin.md](docs/customer-accounts-admin.md)**.
 
@@ -116,9 +117,34 @@ npm test         # unit asserts (scripts/audit-unit.ts): checkout URL, money, sa
                  # return paths, rate limiters (in-memory + shared), client IP, cart edits/notices, stock rules
 
 npx tsx scripts/test-cart.ts <product-handle>   # live cart smoke test (hits Shopify)
+npm run e2e      # browser tests (Playwright) against a local build: see End-to-end tests
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, typecheck, `npm test` and `next build` on every push and pull request. The build prerenders pages from Shopify, so it needs the Shopify variables as GitHub Actions secrets; without them (for example a pull request from a fork) the build step is skipped. A second job typechecks the backend, applies its migrations to a throwaway Postgres and runs its tests.
+
+## End-to-end tests
+
+Playwright tests in `e2e/` drive a real browser against a **local production build**:
+- **Shopping:** home → collection → product → add to cart → the drawer → the cart page. It never clicks checkout.
+- **Collections:** a brand filter, sorting by price, and scrolling to load more.
+- **Search:** suggestions while typing, then Enter for the results page.
+- **Favourites:** a guest's heart sends them to the login page with the product remembered. The test stops before Shopify's login.
+
+They read whatever the catalog contains, so they don't depend on specific products. They never check out, log in or delete anything (adding to cart creates a throwaway Shopify cart).
+
+**Run locally:**
+```bash
+# 1. Backend with a synced catalog (once)
+cd backend && docker compose up -d --wait && npm run db:migrate && npm run catalog:backfill && npm run build && cd ..
+# 2. In the root .env: BACKEND_URL=http://127.0.0.1:4000 and the backend's BACKEND_SERVICE_TOKEN
+# 3. Build the storefront and run the tests
+npx playwright install chromium   # once
+npm run build
+npm run e2e
+```
+`npm run e2e` starts the built backend and `next start` (port 3100) itself, or reuses them if they're already running. On failure, `npx playwright show-report` and the traces in `test-results/` show what happened.
+
+**In CI** (`.github/workflows/ci.yml`, job `e2e`), the tests run on pull requests and manual runs: a throwaway Postgres, the catalog synced from Shopify, the backend and storefront built and started, then the tests. They're skipped with a notice when the Shopify secrets aren't available (for example on pull requests from forks). On failure, the report is uploaded as an artifact.
 
 ## Deploy
 
@@ -146,6 +172,39 @@ With `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` set, errors go to Sentry; without t
 
 **Test it locally:** set `SENTRY_DSN` and `SENTRY_DEBUG=1` in `.env`, `npm run build && npm start`, then open `/api/debug/sentry` (500 and a "Sentry test error" event). Browser errors are reported when `NEXT_PUBLIC_SENTRY_DSN` is set and an error page catches an error in the browser. The backend has its own: see `backend/README.md → Monitoring`.
 
+## Content-Security-Policy
+
+The site sends a **Report-Only** CSP (`lib/csp.ts`, applied in `next.config.ts`): browsers report what it *would* block, but block nothing. It allows what the storefront actually uses:
+- **Its own origin**, for scripts, styles, fonts and API calls.
+- **Shopify:** CDN images; Customer Account login and logout redirects (`form-action`).
+- **Sentry** ingest, when `NEXT_PUBLIC_SENTRY_DSN` is set.
+- **Vercel's preview toolbar**, on preview deployments only.
+
+The Storefront and Customer Account APIs are only called from the server, and checkout is a full-page navigation, so they need no browser rules. It's a static header (no nonces) so pages stay statically rendered; the cost is `script-src 'unsafe-inline'`, which Next's inline data scripts need.
+
+**Reading violations.** Browsers post reports to `/api/csp-report` (`report-uri`, plus `Reporting-Endpoints` when `SITE_URL` is set). Each distinct violation is logged once per hour per server instance:
+```
+[csp] would block script-src-elem https://example.com on /collections/men
+```
+- **Vercel:** Logs, search `[csp]`.
+- **Sentry:** with Sentry on, warnings titled "CSP would block …", tagged `area=csp`, `directive` and `blocked`.
+
+Only the directive, the blocked origin and the page path are kept: no query strings or full URLs. A browser extension can also cause reports (for example `chrome-extension`); those can be ignored.
+
+**Switching to enforcing.** When the reports are quiet for a while (or only show things you're happy to block), set `CSP_ENFORCE=1` in Vercel and redeploy. The same policy is then sent as `Content-Security-Policy` (enforced), with `upgrade-insecure-requests` added. Reports keep coming, now for things actually blocked. To go back, remove the variable.
+
+Notes:
+- `frame-ancestors 'none'` takes over from `X-Frame-Options: DENY` once enforced. Both are sent, so framing is blocked either way.
+- If you add a third-party script, image host or API later, add its origin to the matching directive in `lib/csp.ts` first.
+
+## After checkout
+
+Checkout is Shopify's hosted checkout, and afterwards shoppers see **Shopify's own thank-you and order-status page**. Shopify doesn't support redirecting from there to a custom URL (there's no return-URL option in the Storefront API, and the old "Additional scripts" redirects don't work with Checkout Extensibility). To bring shoppers back to the storefront:
+1. **"Continue shopping"** on Shopify's thank-you page goes to the store's `myshopify.com` address. Install Shopify's redirect theme (the Hydrogen redirect theme) in **Online Store → Themes** and point it at your storefront URL (`SITE_URL`), so that address forwards to this site.
+2. **Order confirmation email** (optional). In **Settings → Notifications → Order confirmation**, add a button linking to your storefront (for example `/account/orders`).
+
+**The finished cart:** when the cart cookie points to a cart Shopify no longer returns, the cart page sends the shopper through `/cart/clear`, which removes the stale cookie, so they start with an empty bag. (Not tested end to end, since that needs a real order.)
+
 ## Security notes
 
 - Storefront token and Customer Account secrets are server-only; sessions are AES-GCM sealed in httpOnly cookies.
@@ -154,13 +213,12 @@ With `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` set, errors go to Sentry; without t
 - The IP comes only from Vercel's own headers (`x-vercel-forwarded-for` / `x-forwarded-for`, which Vercel overwrites so clients can't fake them; `lib/client-ip.ts`). Outside Vercel no header is trusted. This relies on Vercel being the outermost proxy: put another CDN in front and every visitor would share that CDN's IP.
 - `proxy.ts` also rejects cross-site logout.
 - Webhooks are verified with HMAC-SHA256 over the raw body.
-- `next.config.ts` sends `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options: DENY` and `Permissions-Policy` on every response. No Content-Security-Policy yet; HSTS comes from Vercel.
+- `next.config.ts` sends `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options: DENY`, `Permissions-Policy` and a Report-Only Content-Security-Policy (see above) on every response. HSTS comes from Vercel.
 
 ## Known gaps
 
 - Demo content in `lib/site-content.ts` (flagged `demo: true`) is hidden until replaced with real links and copy
-- No policy pages (privacy, refunds, terms) or post-checkout thank-you page yet
+- No policy pages (privacy, refunds, terms); after checkout, shoppers see Shopify's own thank-you page (see After checkout)
 - No analytics / cookie consent
 - Single market: prices shown in the store currency, `en-US` formatting
 - Variants and images are capped per product (100 variants, 12 images on the product page)
-- No end-to-end (browser) tests

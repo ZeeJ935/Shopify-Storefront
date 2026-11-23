@@ -21,6 +21,7 @@ import {
 } from "../lib/customer-account/id-token";
 import { parseSessionPayload, seal, unseal } from "../lib/customer-account/seal";
 import { isServiceTokenValid } from "../lib/service-token";
+import { buildCsp, cspHeaders, createViolationDeduper, parseCspReports, sentryIngestOrigin } from "../lib/csp";
 import { scrubEvent as scrubSentryEvent } from "../lib/sentry-scrub";
 import { reportError } from "../lib/report-error";
 import fs from "node:fs";
@@ -815,6 +816,86 @@ function testReportErrorWithSentryOff() {
   }
 }
 
+// ---- Content-Security-Policy ----
+
+function testCsp() {
+  const prod = buildCsp({
+    NODE_ENV: "production",
+    VERCEL_ENV: "production",
+    NEXT_PUBLIC_SENTRY_DSN: "https://key@o450.ingest.us.sentry.io/123",
+    SHOPIFY_STORE_DOMAIN: "zj-store.myshopify.com",
+  });
+  const directive = (csp: string, name: string) => csp.split("; ").find((d) => d.startsWith(`${name} `)) ?? "";
+  assert.equal(directive(prod, "default-src"), "default-src 'self'");
+  assert.equal(directive(prod, "script-src"), "script-src 'self' 'unsafe-inline'");
+  assert.equal(directive(prod, "connect-src"), "connect-src 'self' https://o450.ingest.us.sentry.io");
+  assert.equal(directive(prod, "img-src"), "img-src 'self' data: blob: https://cdn.shopify.com");
+  assert.equal(
+    directive(prod, "form-action"),
+    "form-action 'self' https://shopify.com https://*.shopify.com https://zj-store.myshopify.com",
+  );
+  assert.equal(directive(prod, "frame-ancestors"), "frame-ancestors 'none'");
+  assert.equal(directive(prod, "frame-src"), "frame-src 'none'");
+  assert.ok(prod.includes("report-uri /api/csp-report") && prod.includes("report-to csp"));
+  assert.ok(!prod.includes("unsafe-eval") && !prod.includes("vercel.live"));
+  assert.ok(!prod.includes("upgrade-insecure-requests"), "not in Report-Only");
+
+  // No Sentry DSN: no ingest host. Dev: eval + HMR sockets. Preview: Vercel toolbar.
+  assert.equal(directive(buildCsp({ NODE_ENV: "production" }), "connect-src"), "connect-src 'self'");
+  const dev = buildCsp({ NODE_ENV: "development" });
+  assert.ok(directive(dev, "script-src").includes("'unsafe-eval'") && directive(dev, "connect-src").includes("ws:"));
+  assert.ok(directive(buildCsp({ NODE_ENV: "production", VERCEL_ENV: "preview" }), "frame-src").includes("https://vercel.live"));
+  assert.ok(buildCsp({ NODE_ENV: "production", CSP_ENFORCE: "1" }).endsWith("upgrade-insecure-requests"));
+
+  // Header name follows CSP_ENFORCE; Reporting-Endpoints only with an absolute SITE_URL.
+  assert.equal(cspHeaders({ NODE_ENV: "production" })[0].key, "Content-Security-Policy-Report-Only");
+  assert.equal(cspHeaders({ NODE_ENV: "production", CSP_ENFORCE: "1" })[0].key, "Content-Security-Policy");
+  assert.equal(cspHeaders({ NODE_ENV: "production" }).length, 1);
+  assert.deepEqual(cspHeaders({ NODE_ENV: "production", SITE_URL: "https://shop.example/" })[1], {
+    key: "Reporting-Endpoints",
+    value: 'csp="https://shop.example/api/csp-report"',
+  });
+  assert.equal(sentryIngestOrigin("not a dsn"), null);
+  assert.equal(sentryIngestOrigin(undefined), null);
+}
+
+function testCspReports() {
+  // Legacy report-uri format.
+  assert.deepEqual(
+    parseCspReports({
+      "csp-report": {
+        "document-uri": "https://shop.example/account/orders?token=SECRET#x",
+        "violated-directive": "script-src-elem",
+        "effective-directive": "script-src-elem",
+        "blocked-uri": "https://evil.example/x.js?session=SECRET",
+      },
+    }),
+    [{ directive: "script-src-elem", blocked: "https://evil.example", page: "/account/orders" }],
+  );
+  // Reporting API format (keeps only csp-violation entries).
+  assert.deepEqual(
+    parseCspReports([
+      { type: "csp-violation", body: { documentURL: "https://shop.example/?q=x", effectiveDirective: "img-src", blockedURL: "data:image/png;base64,AAAA" } },
+      { type: "deprecation", body: {} },
+      { type: "csp-violation", body: { documentURL: "https://shop.example/cart", effectiveDirective: "script-src", blockedURL: "inline" } },
+    ]),
+    [
+      { directive: "img-src", blocked: "data", page: "/" },
+      { directive: "script-src", blocked: "inline", page: "/cart" },
+    ],
+  );
+  assert.deepEqual(parseCspReports(null), []);
+  assert.deepEqual(parseCspReports({ other: 1 }), []);
+
+  // Dedupe: once per window per (directive, blocked, page).
+  const first = createViolationDeduper(1000);
+  const v = { directive: "img-src", blocked: "https://x.example", page: "/" };
+  assert.equal(first(v, 0), true);
+  assert.equal(first(v, 500), false);
+  assert.equal(first({ ...v, page: "/cart" }, 500), true);
+  assert.equal(first(v, 1500), true);
+}
+
 testRateLimiter();
 testSameOrigin();
 testApplyPendingEdits();
@@ -827,6 +908,8 @@ testPickFavouritesStore();
 testServiceToken();
 testClientIp();
 testSharedCatalogCode();
+testCsp();
+testCspReports();
 testSentryScrub();
 testReportErrorWithSentryOff();
 testLoadFavourites()

@@ -9,6 +9,7 @@ export function rateLimitBucket(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (pathname === "/api/predictive-search") return { name: "search", limit: 60 };
   if (pathname === "/api/catalog") return { name: "catalog", limit: 60 };
+  if (pathname === "/api/csp-report") return { name: "csp", limit: 30 };
   // Server Actions (cart, favourites, account) are POSTs carrying this header.
   if (request.method === "POST" && request.headers.has("next-action")) {
     return { name: "action", limit: 120 };
