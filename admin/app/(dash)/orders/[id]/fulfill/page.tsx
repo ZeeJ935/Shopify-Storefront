@@ -1,9 +1,11 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FulfillFlow } from "@/components/FulfillFlow";
+import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Page } from "@/components/ui/Page";
 import { FULFILLABLE } from "@/lib/fulfill";
-import { requireSession } from "@/lib/session-server";
 import { loadOrder } from "@/lib/orders-server";
+import { requireSession } from "@/lib/session-server";
 
 export default async function FulfillPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ fo?: string }> }) {
   await requireSession("operator");
@@ -22,16 +24,16 @@ export default async function FulfillPage({ params, searchParams }: { params: Pr
     });
 
   return (
-    <>
-      <p>
-        <Link href={`/orders/${id}`}>← {order.name}</Link>
-      </p>
-      <h1>Fulfill {order.name}</h1>
+    <Page title={`Fulfill items`} subtitle={order.name} backHref={`/orders/${id}`} narrow>
       {!FULFILLABLE.has(fo.status) || lines.length === 0 ? (
-        <p className="muted">Nothing left to fulfill on this fulfillment order.</p>
+        <Card>
+          <div className="py-8">
+            <EmptyState title="Nothing left to fulfill">Every item on this fulfillment order has been fulfilled.</EmptyState>
+          </div>
+        </Card>
       ) : (
-        <FulfillFlow orderId={id} foId={foId} lines={lines} />
+        <FulfillFlow orderId={id} orderName={order.name} foId={foId} lines={lines} />
       )}
-    </>
+    </Page>
   );
 }

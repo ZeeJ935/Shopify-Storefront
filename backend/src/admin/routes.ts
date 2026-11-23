@@ -7,6 +7,7 @@ import { fulfillmentBodySchema, normalizeRequest, readIdempotencyKey, type Fulfi
 import { inventoryRoutes } from "../routes/inventory.js";
 import { ordersRoutes } from "../routes/orders.js";
 import { roleAtLeast, roleFor, type StaffRole } from "./allowlist.js";
+import { adminSearch, adminSummary } from "./insights.js";
 import { emailHash, type AuditEntry, type AuditOutcome, type AuditStore } from "./audit.js";
 import type { AdminEnv } from "./env.js";
 import { GoogleTokenError, type GoogleVerifier } from "./google.js";
@@ -239,6 +240,13 @@ export function adminRoutes(app: FastifyInstance, deps: AdminRouteDeps) {
       });
 
       s.get("/admin/me", async (request) => ({ staff: request.staff }));
+
+      // Dashboard counts and staff search (viewer+; read-only, no customer data).
+      s.get("/admin/summary", async () => adminSummary(deps.pool));
+      s.get("/admin/search", async (request) => {
+        const q = (request.query as { q?: unknown }).q;
+        return adminSearch(deps.pool, typeof q === "string" ? q : "");
+      });
 
       // Reads (viewer+): same handlers as /v1, without their sync endpoints.
       ordersRoutes(s, { pool: deps.pool }, { base: "/admin", sync: false });

@@ -1,16 +1,133 @@
-:root { color-scheme: light dark; --fg: #111; --bg: #fff; --muted: #666; --line: #ddd; --accent: #0b57d0; --warn: #b3261e; }
-@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #121212; --muted: #aaa; --line: #333; --accent: #8ab4f8; --warn: #f2b8b5; } }
-* { box-sizing: border-box; }
-body { margin: 0; font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--fg); background: var(--bg); }
-a { color: var(--accent); }
-main { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
-header.bar { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-header.bar nav { display: flex; gap: 14px; }
-.muted { color: var(--muted); }
-.card { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; }
-button, .button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; text-decoration: none; display: inline-block; }
-button.primary, .button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-.error { color: var(--warn); }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-code { font-size: 13px; }
+@import "tailwindcss";
+
+/* Admin design tokens (Shopify-admin-like conventions, our own brand). */
+:root {
+  --bg: #f1f1f1;
+  --surface: #ffffff;
+  --surface-hover: #f7f7f7;
+  --surface-subdued: #f7f7f7;
+  --surface-selected: #f1f1f1;
+  --border: #e3e3e3;
+  --border-strong: #cccccc;
+  --text: #303030;
+  --text-subdued: #616161;
+  --text-disabled: #b5b5b5;
+  --topbar: #1a1a1a;
+  --topbar-text: #e3e3e3;
+  --topbar-field: #303030;
+  --nav: #ebebeb;
+  --nav-hover: #e3e3e3;
+  --nav-active: #fafafa;
+  --primary: #303030;
+  --primary-hover: #1a1a1a;
+  --primary-text: #ffffff;
+  --link: #005bd3;
+  --focus: #005bd3;
+  --success-bg: #affebf;
+  --success-text: #014b40;
+  --attention-bg: #ffeb78;
+  --attention-text: #4f4700;
+  --warning-bg: #ffd6a4;
+  --warning-text: #5e4200;
+  --critical-bg: #fedad9;
+  --critical-text: #8e0b21;
+  --critical: #c70a24;
+  --info-bg: #e0f0ff;
+  --info-text: #00527c;
+  --neutral-bg: #e3e3e3;
+  --neutral-text: #616161;
+  --shadow: 0 1px 0 0 rgba(26, 26, 26, 0.07), 0 1px 0 0 rgba(204, 204, 204, 0.5) inset, 0 -1px 0 0 rgba(0, 0, 0, 0.13) inset;
+  --shadow-card: 0 1px 0 0 rgba(26, 26, 26, 0.07), 0 0 0 1px rgba(26, 26, 26, 0.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141414;
+    --surface: #1f1f1f;
+    --surface-hover: #2a2a2a;
+    --surface-subdued: #262626;
+    --surface-selected: #2e2e2e;
+    --border: #333333;
+    --border-strong: #4a4a4a;
+    --text: #e8e8e8;
+    --text-subdued: #a6a6a6;
+    --text-disabled: #6b6b6b;
+    --topbar: #0c0c0c;
+    --topbar-field: #262626;
+    --nav: #191919;
+    --nav-hover: #262626;
+    --nav-active: #2e2e2e;
+    --primary: #f1f1f1;
+    --primary-hover: #ffffff;
+    --primary-text: #141414;
+    --link: #7fb4ff;
+    --focus: #7fb4ff;
+    --success-bg: #0f3d2e;
+    --success-text: #9cf0b6;
+    --attention-bg: #3d3600;
+    --attention-text: #f5e27a;
+    --warning-bg: #4a2f00;
+    --warning-text: #ffcf8f;
+    --critical-bg: #4a0f18;
+    --critical-text: #ffb3ba;
+    --critical: #ff6b7d;
+    --info-bg: #0b3149;
+    --info-text: #a6d8ff;
+    --neutral-bg: #333333;
+    --neutral-text: #c7c7c7;
+    --shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+    --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-subdued: var(--surface-subdued);
+  --color-surface-selected: var(--surface-selected);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg: var(--text);
+  --color-subdued: var(--text-subdued);
+  --color-disabled: var(--text-disabled);
+  --color-topbar: var(--topbar);
+  --color-topbar-fg: var(--topbar-text);
+  --color-topbar-field: var(--topbar-field);
+  --color-nav: var(--nav);
+  --color-nav-hover: var(--nav-hover);
+  --color-nav-active: var(--nav-active);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-on-primary: var(--primary-text);
+  --color-link: var(--link);
+  --color-focus: var(--focus);
+  --color-critical: var(--critical);
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --shadow-button: var(--shadow);
+  --shadow-card: var(--shadow-card);
+}
+
+/* Base element styles live in a layer so Tailwind utilities (e.g. text-fg on links) win. */
+@layer base {
+  html,
+  body {
+    background: var(--bg);
+    color: var(--text);
+  }
+  body {
+    font-size: 13px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+  }
+  a {
+    color: var(--link);
+  }
+  dialog::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+}

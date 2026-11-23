@@ -153,6 +153,20 @@ describe.skipIf(!url)("staff admin in Postgres", () => {
     expect(JSON.stringify(entries)).not.toMatch(/address|phone|first_?name|last_?name|customer_?(id|email|name)|destination/i);
   });
 
+  it("summary and search (viewer+): counts, exact order match, SKU prefix, LIKE wildcards escaped", async () => {
+    const op = (await exchange("g-op|op@x.com")).json().token;
+    const summary = await call("GET", "/admin/summary", op);
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json()).toMatchObject({ unfulfilledOrders: 1, openFulfillmentOrders: 1, lowStockAt: 5 });
+
+    const exact = (await call("GET", "/admin/search?q=%239501", op)).json();
+    expect(exact.exactOrderId).toBe(ORDER);
+    expect((await call("GET", "/admin/search?q=9501", op)).json().exactOrderId).toBe(ORDER);
+    const none = (await call("GET", "/admin/search?q=%25", op)).json(); // "%" must not match everything
+    expect(none.orders).toEqual([]);
+    expect((await call("GET", "/admin/search?q=", op)).json()).toEqual({ exactOrderId: null, orders: [], skus: [] });
+  });
+
   it("staff rows: one per Google account; an email change updates the same row", async () => {
     const store = createStaffStore(pool);
     const a = await store.upsertOnLogin({ email: "new@x.com", googleSub: "g-change", role: "viewer" });

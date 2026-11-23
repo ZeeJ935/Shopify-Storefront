@@ -1,8 +1,24 @@
-import Link from "next/link";
 import { SyncPanel } from "@/components/SyncPanel";
+import { Badge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { IndexTable } from "@/components/ui/IndexTable";
+import { Page } from "@/components/ui/Page";
+import { Pagination } from "@/components/ui/Pagination";
+import { auditBadge, roleLabel } from "@/lib/badges";
 import { formatDate } from "@/lib/fulfill";
 import { requireSession, staffFetch } from "@/lib/session-server";
 import type { AuditEntry } from "@/lib/types";
+
+const ACTION_LABELS: Record<string, string> = {
+  "auth.login": "Signed in",
+  "auth.refresh": "Session refresh",
+  "fulfillment.create": "Fulfillment",
+  "sync.catalog": "Catalog sync",
+  "sync.inventory": "Inventory sync",
+  "sync.orders": "Orders sync",
+  "audit.read": "Viewed audit log",
+  sync: "Sync",
+};
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<{ before?: string }> }) {
   await requireSession("admin");
@@ -12,47 +28,53 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   const { entries, nextBefore } = await staffFetch<{ entries: AuditEntry[]; nextBefore: number | null }>(`/admin/audit?${q}`);
 
   return (
-    <>
-      <h1>Audit log</h1>
-      <SyncPanel />
-      <table>
-        <thead>
-          <tr>
-            <th>When</th>
-            <th>Who</th>
-            <th>Action</th>
-            <th>Resource</th>
-            <th>Result</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((e) => (
-            <tr key={e.id}>
-              <td>{formatDate(e.at)}</td>
-              <td>
-                {e.staffEmail ?? <span className="muted">—</span>} {e.role ? <span className="muted">({e.role})</span> : null}
-              </td>
-              <td>{e.action}</td>
-              <td>
-                <code>{e.resourceId ?? "—"}</code>
-              </td>
-              <td className={e.result === "denied" || e.result === "error" || e.result === "rejected" ? "error" : undefined}>
-                {e.result}
-                {e.statusCode ? ` (${e.statusCode})` : ""}
-              </td>
-              <td>
-                <code>{e.detail ? JSON.stringify(e.detail) : ""}</code>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {nextBefore ? (
-        <p>
-          <Link href={`/audit?before=${nextBefore}`}>Older →</Link>
-        </p>
-      ) : null}
-    </>
+    <Page title="Audit log" subtitle="Who did what, and when. No customer data is recorded." actions={<SyncPanel />}>
+      <IndexTable
+        columns={[
+          { key: "when", label: "Date" },
+          { key: "who", label: "Staff" },
+          { key: "action", label: "Action" },
+          { key: "resource", label: "Resource", className: "hidden md:table-cell" },
+          { key: "result", label: "Result" },
+          { key: "detail", label: "Detail", className: "hidden lg:table-cell" },
+        ]}
+        rows={entries.map((e) => {
+          const b = auditBadge(e.result);
+          return {
+            key: String(e.id),
+            cells: {
+              when: <span className="whitespace-nowrap text-subdued">{formatDate(e.at)}</span>,
+              who: e.staffEmail ? (
+                <span>
+                  {e.staffEmail}
+                  {e.role ? <span className="block text-xs text-subdued">{roleLabel(e.role)}</span> : null}
+                </span>
+              ) : (
+                <span className="text-subdued">Unknown (not signed in)</span>
+              ),
+              action: <span className="font-medium">{ACTION_LABELS[e.action] ?? e.action}</span>,
+              resource: <span className="font-mono text-xs break-all text-subdued">{e.resourceId ?? "—"}</span>,
+              result: (
+                <span className="flex items-center gap-1.5">
+                  <Badge tone={b.tone}>{b.label}</Badge>
+                  {e.statusCode ? <span className="text-xs text-subdued">{e.statusCode}</span> : null}
+                </span>
+              ),
+              detail: e.detail ? (
+                <span className="flex flex-wrap gap-1">
+                  {Object.entries(e.detail).map(([k, v]) => (
+                    <span key={k} className="rounded-md bg-surface-subdued px-1.5 py-0.5 font-mono text-[11px] text-subdued">
+                      {k}: {String(v)}
+                    </span>
+                  ))}
+                </span>
+              ) : null,
+            },
+          };
+        })}
+        empty={<EmptyState title="Nothing recorded yet" />}
+        footer={before || nextBefore ? <Pagination firstHref={before ? "/audit" : null} nextHref={nextBefore ? `/audit?before=${nextBefore}` : null} /> : null}
+      />
+    </Page>
   );
 }

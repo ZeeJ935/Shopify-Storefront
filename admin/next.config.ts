@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 // Internal staff dashboard: never indexed, never framed. The Content-Security-Policy
@@ -13,6 +14,14 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // This app has its own lockfile; don't let Next pick the repo root (it would trace the wrong node_modules).
+  outputFileTracingRoot: path.join(__dirname),
+  turbopack: {
+    root: path.join(__dirname),
+    rules: {
+      "*.css": { loaders: ["@tailwindcss/turbopack"], as: "*.css" },
+    },
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

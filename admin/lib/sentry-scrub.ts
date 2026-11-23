@@ -82,6 +82,9 @@ export function scrubEvent<T>(event: T): T {
 
 export const SENTRY_COMMON_OPTIONS = {
   tracesSampleRate: 0.1,
+  // The SDK's default 'stream' mode ignores beforeSendTransaction, which would skip
+  // scrubEvent for transactions. 'static' keeps the scrubber in the path.
+  traceLifecycle: "static" as const,
   sendDefaultPii: false,
   dataCollection: {
     userInfo: false,

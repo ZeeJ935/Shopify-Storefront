@@ -1,6 +1,11 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Badge } from "@/components/ui/Badge";
+import { Banner } from "@/components/ui/Banner";
+import { LinkButton } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Page } from "@/components/ui/Page";
 import { BackendError } from "@/lib/backend";
+import { actionBadge } from "@/lib/badges";
 import { formatDate } from "@/lib/fulfill";
 import { staffFetch } from "@/lib/session-server";
 import type { FulfillmentAction } from "@/lib/types";
@@ -15,28 +20,37 @@ export default async function FulfillmentStatusPage({ params }: { params: Promis
     if (error instanceof BackendError && error.status === 404) notFound();
     throw error;
   }
+  const badge = actionBadge(action.status);
   const done = action.status === "succeeded" || action.status === "failed" || action.status === "dry_run";
   return (
-    <>
-      <h1>Fulfillment</h1>
-      <div className="card">
-        <p>
-          Status: <strong className={action.status === "failed" ? "error" : undefined}>{action.status}</strong> · attempts {action.attempts}
-        </p>
-        {action.shopifyFulfillmentId ? <p className="muted">Shopify fulfillment {action.shopifyFulfillmentId}</p> : null}
-        {action.lastError ? <p className="error">{action.lastError}</p> : null}
-        <p className="muted">
-          Created {formatDate(action.createdAt)} · updated {formatDate(action.updatedAt)}
-        </p>
-        {!done ? (
-          <Link className="button" href={`/fulfillments/${encodeURIComponent(key)}`}>
-            Refresh
-          </Link>
-        ) : null}
-      </div>
-      <p>
-        <Link href="/orders">← Orders</Link>
-      </p>
-    </>
+    <Page
+      title="Fulfillment request"
+      backHref="/orders"
+      narrow
+      titleMeta={<Badge tone={badge.tone}>{badge.label}</Badge>}
+      actions={!done ? <LinkButton href={`/fulfillments/${encodeURIComponent(key)}`}>Refresh</LinkButton> : null}
+    >
+      {action.status === "succeeded" ? <Banner tone="success" title="Fulfilled in Shopify" /> : null}
+      {action.status === "failed" ? (
+        <Banner tone="critical" title="This fulfillment failed">
+          {action.lastError}
+        </Banner>
+      ) : null}
+      {!done ? <Banner tone="info" title="Working on it">Shopify is processing the request. Refresh in a few seconds.</Banner> : null}
+      <Card>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+          <dt className="text-subdued">Attempts</dt>
+          <dd>{action.attempts}</dd>
+          <dt className="text-subdued">Shopify fulfillment</dt>
+          <dd className="break-all">{action.shopifyFulfillmentId ?? "—"}</dd>
+          <dt className="text-subdued">Requested</dt>
+          <dd>{formatDate(action.createdAt)}</dd>
+          <dt className="text-subdued">Last update</dt>
+          <dd>{formatDate(action.updatedAt)}</dd>
+          <dt className="text-subdued">Reference</dt>
+          <dd className="font-mono text-xs break-all">{action.key}</dd>
+        </dl>
+      </Card>
+    </Page>
   );
 }
