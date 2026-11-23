@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Separate service with its own tsconfig and checks.
     "backend/**",
+    // Separate admin app with its own config and checks.
+    "admin/**",
   ]),
 ]);
 

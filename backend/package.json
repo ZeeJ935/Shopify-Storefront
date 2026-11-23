@@ -22,6 +22,7 @@
     "orders:backfill": "tsx --env-file-if-exists=.env src/orders/backfill.ts",
     "orders:backfill:prod": "node --env-file-if-exists=.env dist/orders/backfill.js",
     "webhooks:register": "tsx --env-file-if-exists=.env src/webhooks/register.ts",
+    "admin:token": "tsx --env-file-if-exists=.env src/admin/dev-token.ts",
     "sync:shared": "rm -rf src/catalog-shared && cp -R ../lib/catalog-shared src/catalog-shared"
   },
   "dependencies": {

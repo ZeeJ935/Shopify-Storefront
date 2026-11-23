@@ -75,3 +75,13 @@ describe("staff admin env", () => {
     }
   });
 });
+
+describe("admin:token (local only)", () => {
+  it("only accepts a database on this machine", async () => {
+    const { isLocalDatabase } = await import("../src/admin/dev-token.js");
+    expect(isLocalDatabase("postgres://zj:zj@127.0.0.1:5433/zj_backend")).toBe(true);
+    expect(isLocalDatabase("postgres://zj:zj@localhost/zj")).toBe(true);
+    expect(isLocalDatabase("postgres://u:p@dpg-abc.oregon-postgres.render.com/db")).toBe(false);
+    expect(isLocalDatabase(undefined)).toBe(false);
+  });
+});
