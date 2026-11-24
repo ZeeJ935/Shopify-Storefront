@@ -5,6 +5,8 @@ export type Column = { key: string; label: string; align?: "start" | "end"; clas
 /**
  * Shopify-style list table: subdued header, row hover, right-aligned numbers.
  * Rows are given as cells keyed by column; the first cell usually holds the link.
+ * The scroll box is `relative` so absolutely positioned children (e.g. sr-only labels)
+ * stay inside it instead of widening the page on mobile.
  */
 export function IndexTable({
   columns,
@@ -25,7 +27,7 @@ export function IndexTable({
       {rows.length === 0 ? (
         <div className="px-4 py-12">{empty}</div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="bg-surface-subdued text-xs text-subdued">

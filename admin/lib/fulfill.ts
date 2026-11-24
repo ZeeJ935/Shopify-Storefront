@@ -1,5 +1,5 @@
 // Pure fulfill-flow rules (no next/* imports), unit tested.
-import { seal, unseal } from "./seal";
+import { openSealedTicket, sealTicket, TICKET_TTL_SECONDS } from "./ticket";
 import type { StaffRole } from "./session";
 
 /** Body for POST /admin/fulfillments (same shape as the backend's schema). */
@@ -12,8 +12,7 @@ export type FulfillmentBody = {
 
 export const FULFILLABLE = new Set(["OPEN", "IN_PROGRESS"]);
 /** How long a confirm screen stays valid. */
-export const TICKET_TTL_SECONDS = 15 * 60;
-const KEY = /^[A-Za-z0-9._:-]{8,200}$/;
+export { TICKET_TTL_SECONDS };
 
 export const canFulfill = (role: StaffRole) => role === "operator" || role === "admin";
 
@@ -59,18 +58,13 @@ export function buildFulfillmentBody(
   };
 }
 
-/** What the confirm screen carries: sealed, so the browser can't change the body or key. */
-type Ticket = { key: string; body: FulfillmentBody; staffId: number; exp: number };
-
+/** Fulfill confirm screen ticket (see lib/ticket.ts). */
 export function createTicket(body: FulfillmentBody, staffId: number, secret: string, nowSeconds: number, key = crypto.randomUUID()): string {
-  return seal({ key, body, staffId, exp: nowSeconds + TICKET_TTL_SECONDS } satisfies Ticket, secret);
+  return sealTicket("fulfill", body, staffId, secret, nowSeconds, key);
 }
 
 export function openTicket(ticket: string, staffId: number, secret: string, nowSeconds: number): { key: string; body: FulfillmentBody } | null {
-  const t = unseal<Ticket>(ticket, secret);
-  if (!t || typeof t.key !== "string" || !KEY.test(t.key) || !t.body || typeof t.exp !== "number") return null;
-  if (t.staffId !== staffId || nowSeconds > t.exp) return null;
-  return { key: t.key, body: t.body };
+  return openSealedTicket<FulfillmentBody>("fulfill", ticket, staffId, secret, nowSeconds);
 }
 
 /** Friendly text for backend refusals (never echoes raw bodies). */
@@ -85,6 +79,9 @@ export function describeFailure(status: number, body: unknown): string {
     idempotency_key_reused: "This confirmation was already used for a different request. Start again.",
     audit_unavailable: "The audit log is unavailable, so nothing was done. Try again shortly.",
     fulfillments_not_configured: "Fulfillments aren't configured on the backend.",
+    warehouse_not_configured: "Warehouse pushes aren't configured on the backend (Admin API off).",
+    nothing_to_push: "Nothing to push: none of the selected rows differ from Shopify any more.",
+    unknown_location: "That location isn't known to the backend. Run an inventory sync first.",
     forbidden: "Your role can't do this.",
   };
   if (typeof code === "string" && reasons[code]) return reasons[code];
@@ -98,6 +95,7 @@ export function navFor(role: StaffRole): NavItem[] {
   return [
     { href: "/orders", label: "Orders" },
     { href: "/inventory", label: "Inventory" },
+    { href: "/warehouse", label: "Warehouse" },
     ...(role === "admin" ? [{ href: "/audit", label: "Audit" }] : []),
   ];
 }

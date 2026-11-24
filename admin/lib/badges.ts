@@ -77,3 +77,44 @@ export function stockBadge(available: number): BadgeSpec {
 }
 
 export const roleLabel = (role: string) => title(role);
+
+export function warehouseStatusBadge(status: string): BadgeSpec {
+  switch (status) {
+    case "match":
+      return { tone: "success", label: "In sync" };
+    case "differs":
+      return { tone: "attention", label: "Differs" };
+    case "large_decrease":
+      return { tone: "critical", label: "Large decrease" };
+    case "unknown_sku":
+      return { tone: "neutral", label: "Unknown SKU" };
+    case "ambiguous_sku":
+      return { tone: "warning", label: "SKU on several items" };
+    case "unknown_location":
+      return { tone: "neutral", label: "Unknown location" };
+    case "untracked":
+      return { tone: "neutral", label: "Not tracked" };
+    case "not_stocked":
+      return { tone: "neutral", label: "Not stocked here" };
+    default:
+      return { tone: "neutral", label: title(status) };
+  }
+}
+
+export function pushResultBadge(result: string): BadgeSpec {
+  if (result === "pushed") return { tone: "success", label: "Pushed" };
+  if (result === "dry_run") return { tone: "info", label: "Dry run" };
+  if (result === "conflict") return { tone: "warning", label: "Conflict (retrying)" };
+  if (result === "conflict_gave_up") return { tone: "critical", label: "Conflict, gave up" };
+  if (result === "failed") return { tone: "critical", label: "Failed" };
+  if (result === "skipped_large_decrease") return { tone: "warning", label: "Skipped: large decrease" };
+  if (result === "skipped_already_queued") return { tone: "neutral", label: "Skipped: already queued" };
+  if (result.startsWith("skipped_")) return { tone: "neutral", label: `Skipped: ${result.slice(8).replace(/_/g, " ")}` };
+  return { tone: "neutral", label: title(result) };
+}
+
+export function pushStatusBadge(status: string): BadgeSpec {
+  if (status === "done") return { tone: "success", label: "Done" };
+  if (status === "running") return { tone: "info", label: "Running" };
+  return { tone: "attention", label: "Queued" };
+}

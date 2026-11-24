@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { safeError } from "../errors.js";
+import type { QueueHealth } from "../db/queue-health.js";
 import type { AdminApiHealth } from "../shopify-admin/index.js";
 
 export type HealthDetails = {
@@ -15,7 +16,19 @@ export type HealthDetails = {
   stuckWebhooks?: number;
   /** received_at of the oldest stuck event; null if none. */
   oldestStuckWebhookAt?: Date | null;
+  /** pg-boss depth and oldest waiting job per queue. */
+  queues?: QueueHealth[];
+  warehouseLastReconcileAt?: Date | null;
+  warehouseDifferences?: number | null;
 };
+
+/** queuesWarning thresholds (warning fields only; /health never 503s for these). */
+export const QUEUE_DEPTH_WARN = 100;
+export const QUEUE_AGE_WARN_SECONDS = 15 * 60;
+
+export function queuesWarning(queues: QueueHealth[]): boolean {
+  return queues.some((q) => q.queued > QUEUE_DEPTH_WARN || (q.oldestQueuedSeconds ?? 0) > QUEUE_AGE_WARN_SECONDS);
+}
 
 /** A sync older than this is flagged as stale (nightly + slack for retries and sleep). */
 export const STALE_AFTER_MS = 26 * 60 * 60 * 1000;
@@ -82,6 +95,20 @@ export function healthRoutes(
         stuck: d ? (d.stuckWebhooks ?? 0) : null,
         oldestStuckAt: d?.oldestStuckWebhookAt ? d.oldestStuckWebhookAt.toISOString() : null,
       },
+      ...(d?.queues
+        ? {
+            queues: Object.fromEntries(d.queues.map(({ name, ...rest }) => [name, rest])),
+            queuesWarning: queuesWarning(d.queues),
+          }
+        : {}),
+      ...(d && "warehouseDifferences" in d
+        ? {
+            warehouse: {
+              lastReconcileAt: d.warehouseLastReconcileAt ? d.warehouseLastReconcileAt.toISOString() : null,
+              differences: d.warehouseDifferences ?? null,
+            },
+          }
+        : {}),
       ...(admin ? { adminApi: admin } : {}),
     };
   });

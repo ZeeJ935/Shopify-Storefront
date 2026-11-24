@@ -6,8 +6,18 @@ name: Keep backend awake
 # service fits the free plan's 750 hours a month). GitHub may start scheduled
 # runs a few minutes late.
 #
-# Set the repository variable BACKEND_HEALTH_URL (Settings → Secrets and
-# variables → Actions → Variables), e.g. https://<your-api>.onrender.com/health
+# The same ping also watches the job queues. The run FAILS (GitHub emails you)
+# when, on two checks 60 seconds apart:
+#   - a queue has more than HEALTH_MAX_QUEUE_DEPTH jobs waiting (default 100), or
+#   - a queue's oldest due job has waited more than HEALTH_MAX_JOB_AGE_SECONDS (default 900), or
+#   - webhooks are stuck (webhooks.stuck > 0), or
+#   - the database is down (HTTP 503).
+# A slow cold start or a timeout only warns.
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   BACKEND_HEALTH_URL           e.g. https://<your-api>.onrender.com/health (required; unset = skip)
+#   HEALTH_MAX_QUEUE_DEPTH       optional, default 100
+#   HEALTH_MAX_JOB_AGE_SECONDS   optional, default 900
 
 on:
   schedule:
@@ -19,21 +29,63 @@ permissions: {}
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 7
     steps:
-      - name: Ping /health
+      - name: Ping /health and check the queues
         env:
           URL: ${{ vars.BACKEND_HEALTH_URL }}
+          MAX_DEPTH: ${{ vars.HEALTH_MAX_QUEUE_DEPTH || '100' }}
+          MAX_AGE: ${{ vars.HEALTH_MAX_JOB_AGE_SECONDS || '900' }}
         run: |
           if [ -z "$URL" ]; then
             echo "::notice::BACKEND_HEALTH_URL is not set; skipping."
             exit 0
           fi
-          # A cold start can take about a minute.
-          code=$(curl -s -o body.json -w '%{http_code}' --max-time 120 "$URL" || echo "000")
-          echo "HTTP $code"; cat body.json 2>/dev/null || true; echo
-          if [ "$code" = "503" ]; then
-            echo "::warning::Backend is up but reports the database as down."
-          elif [ "$code" != "200" ]; then
-            echo "::warning::Backend did not answer /health (HTTP $code)."
+          case "$MAX_DEPTH$MAX_AGE" in *[!0-9]*) echo "::error::HEALTH_MAX_QUEUE_DEPTH and HEALTH_MAX_JOB_AGE_SECONDS must be whole numbers."; exit 1 ;; esac
+
+          # Problems in a 200 body, one per line; nothing printed means healthy.
+          problems() {
+            jq -r --argjson depth "$MAX_DEPTH" --argjson age "$MAX_AGE" '
+              ((.queues // {}) | to_entries[] | select(.value.queued > $depth)
+                | "queue \(.key): \(.value.queued) jobs waiting (max \($depth))"),
+              ((.queues // {}) | to_entries[] | select((.value.oldestQueuedSeconds // 0) > $age)
+                | "queue \(.key): oldest job has waited \(.value.oldestQueuedSeconds)s (max \($age)s)"),
+              (select((.webhooks.stuck // 0) > 0) | "webhooks: \(.webhooks.stuck) stuck")
+            ' body.json
+          }
+
+          # Sets $code, $result (ok | breach | db_down | unreachable) and $found.
+          check() {
+            # A cold start can take about a minute.
+            # curl prints 000 itself when it can't connect; don't append another.
+            code=$(curl -s -o body.json -w '%{http_code}' --max-time 120 "$URL") || true
+            [ -n "$code" ] || code="000"
+            found=""
+            if [ "$code" = "503" ]; then
+              result=db_down
+            elif [ "$code" = "200" ]; then
+              found=$(problems || echo "could not parse /health")
+              if [ -n "$found" ]; then result=breach; else result=ok; fi
+            else
+              result=unreachable
+            fi
+            echo "HTTP $code → $result"
+            jq -c '{db, queues, queuesWarning, webhooks}' body.json 2>/dev/null || true
+          }
+
+          check
+          if [ "$result" = "breach" ] || [ "$result" = "db_down" ]; then
+            [ -n "$found" ] && echo "$found"
+            echo "Checking again in 60 seconds before alerting…"
+            sleep 60
+            check
           fi
+
+          case "$result" in
+            ok) echo "Healthy." ;;
+            unreachable) echo "::warning::Backend did not answer /health (HTTP $code); it may be waking up." ;;
+            db_down) echo "::error::Backend is up but reports the database as down (twice)."; exit 1 ;;
+            breach)
+              printf '%s\n' "$found" | while IFS= read -r line; do echo "::error::$line"; done
+              exit 1 ;;
+          esac

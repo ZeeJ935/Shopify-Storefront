@@ -23,3 +23,4 @@ export const InfoIcon = (p: Props) => base(<><circle cx="10" cy="10" r="7" /><pa
 export const SyncIcon = (p: Props) => base(<><path d="M16 7a6.5 6.5 0 0 0-11.7-1.5M4 13a6.5 6.5 0 0 0 11.7 1.5" /><path d="M16 3v4h-4M4 17v-4h4" /></>, p);
 export const LogoutIcon = (p: Props) => base(<><path d="M8 16.5H4.5a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1H8" /><path d="m12.5 13.5 3.5-3.5-3.5-3.5M16 10H8" /></>, p);
 export const TruckIcon = (p: Props) => base(<><path d="M2.5 5h9v8h-9zM11.5 8h3l3 3v2h-6" /><circle cx="6" cy="14.5" r="1.5" /><circle cx="14.5" cy="14.5" r="1.5" /></>, p);
+export const WarehouseIcon = (p: Props) => base(<><path d="M2.5 8 10 3.5 17.5 8v8.5h-15V8Z" /><path d="M6 16.5v-5h8v5M6 13.5h8" /></>, p);

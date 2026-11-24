@@ -2,10 +2,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { AuditIcon, CloseIcon, HomeIcon, InventoryIcon, MenuIcon, OrdersIcon } from "./ui/Icons";
+import { AuditIcon, CloseIcon, HomeIcon, InventoryIcon, MenuIcon, OrdersIcon, WarehouseIcon } from "./ui/Icons";
 import { cx } from "./ui/cx";
 
-const ICONS = { "/": HomeIcon, "/orders": OrdersIcon, "/inventory": InventoryIcon, "/audit": AuditIcon } as const;
+const ICONS = { "/": HomeIcon, "/orders": OrdersIcon, "/inventory": InventoryIcon, "/warehouse": WarehouseIcon, "/audit": AuditIcon } as const;
 
 export function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);

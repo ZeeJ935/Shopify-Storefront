@@ -15,7 +15,7 @@ export class BackendError extends Error {
 }
 
 export type AdminFetchOptions = {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PUT";
   body?: unknown;
   staffToken?: string;
   clientIp?: string;

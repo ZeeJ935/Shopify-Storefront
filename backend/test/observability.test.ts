@@ -92,6 +92,36 @@ describe("GET /health", () => {
     await app.close();
   });
 
+  it("reports queue depth and oldest waiting job as warning fields, still 200", async () => {
+    const { app } = setup({
+      details: async () => ({
+        lastSyncAt: new Date(),
+        failedWebhooks24h: 0,
+        queues: [
+          { name: "shopify-webhook", queued: 2, active: 1, failed: 0, oldestQueuedSeconds: 30 },
+          { name: "warehouse-push-item", queued: 0, active: 0, failed: 1, oldestQueuedSeconds: null },
+        ],
+        warehouseLastReconcileAt: null,
+        warehouseDifferences: 3,
+      }),
+    });
+    const res = await app.inject({ method: "GET", url: "/health" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().queues).toEqual({
+      "shopify-webhook": { queued: 2, active: 1, failed: 0, oldestQueuedSeconds: 30 },
+      "warehouse-push-item": { queued: 0, active: 0, failed: 1, oldestQueuedSeconds: null },
+    });
+    expect(res.json().queuesWarning).toBe(false);
+    expect(res.json().warehouse).toEqual({ lastReconcileAt: null, differences: 3 });
+    await app.close();
+
+    const old = setup({ details: async () => ({ lastSyncAt: new Date(), failedWebhooks24h: 0, queues: [{ name: "q", queued: 101, active: 0, failed: 0, oldestQueuedSeconds: 5 }] }) });
+    const warn = await old.app.inject({ method: "GET", url: "/health" });
+    expect(warn.statusCode).toBe(200);
+    expect(warn.json().queuesWarning).toBe(true);
+    await old.app.close();
+  });
+
   it("is 503 only when the database is down", async () => {
     let detailsCalled = false;
     const { app } = setup({

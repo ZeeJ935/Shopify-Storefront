@@ -6,7 +6,7 @@ import { Badge } from "./ui/Badge";
 import { Banner } from "./ui/Banner";
 import { Button, LinkButton } from "./ui/Button";
 import { Card, CardSection } from "./ui/Card";
-import { Field, inputClass } from "./ui/Field";
+import { Field, inputBase, inputClass } from "./ui/Field";
 import { CheckIcon } from "./ui/Icons";
 import { cx } from "./ui/cx";
 
@@ -140,7 +140,7 @@ export function FulfillFlow({ orderId, orderName, foId, lines }: { orderId: stri
               </span>
               <label className="flex shrink-0 items-center gap-2">
                 <span className="sr-only">Quantity for {l.title}</span>
-                <input type="number" name={`qty:${l.id}`} min={0} max={l.remaining} defaultValue={l.remaining} className={`${inputClass} w-20 text-right`} />
+                <input type="number" name={`qty:${l.id}`} min={0} max={l.remaining} defaultValue={l.remaining} className={`${inputBase} w-20 text-right`} />
                 <span className="text-subdued tabular-nums">of {l.remaining}</span>
               </label>
             </li>

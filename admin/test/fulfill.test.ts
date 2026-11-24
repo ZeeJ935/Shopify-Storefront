@@ -64,9 +64,9 @@ describe("roles in the UI", () => {
   it("viewers get no fulfill or audit/sync; operators fulfill; admins see audit", () => {
     assert.equal(canFulfill("viewer"), false);
     assert.equal(canFulfill("operator"), true);
-    assert.deepEqual(navFor("viewer").map((n) => n.href), ["/orders", "/inventory"]);
-    assert.deepEqual(navFor("operator").map((n) => n.href), ["/orders", "/inventory"]);
-    assert.deepEqual(navFor("admin").map((n) => n.href), ["/orders", "/inventory", "/audit"]);
+    assert.deepEqual(navFor("viewer").map((n) => n.href), ["/orders", "/inventory", "/warehouse"]);
+    assert.deepEqual(navFor("operator").map((n) => n.href), ["/orders", "/inventory", "/warehouse"]);
+    assert.deepEqual(navFor("admin").map((n) => n.href), ["/orders", "/inventory", "/warehouse", "/audit"]);
   });
 
   it("explains refusals without echoing backend bodies", () => {

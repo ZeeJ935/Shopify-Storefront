@@ -187,6 +187,32 @@ Before anything is sent, request bodies (webhook payloads), cookies, query strin
 
 `webhooks.stuck` on `/health` counts stuck events; `oldestStuckAt` is when the oldest one arrived.
 
+**Queues on `/health`** (warning fields only — `/health` is still `503` only when the database is down):
+
+```json
+"queues": { "shopify-webhook": { "queued": 0, "active": 0, "failed": 0, "oldestQueuedSeconds": null }, "...": {} },
+"queuesWarning": false,
+"warehouse": { "lastReconcileAt": "…", "differences": 0 }
+```
+
+`queued` = jobs waiting (created or retry); `oldestQueuedSeconds` = how long the oldest *due* job has waited (a job waiting out a retry delay doesn't count); `queuesWarning` is true when any queue has more than 100 waiting or a job older than 15 minutes.
+
+**Alerting via the keep-alive workflow** (`.github/workflows/keepalive.yml`, every 10 minutes): the run **fails** — and GitHub emails whoever last changed the workflow's schedule — when a queue has more than `HEALTH_MAX_QUEUE_DEPTH` jobs waiting (default 100), a queue's oldest due job has waited more than `HEALTH_MAX_JOB_AGE_SECONDS` (default 900), `webhooks.stuck > 0`, or the database is down. A breach is checked again after 60 seconds and only fails if it's still there; a database-down answer gets one retry too. Slow cold starts and timeouts only warn. Set the thresholds as repository variables (Settings → Secrets and variables → Actions → Variables); `BACKEND_HEALTH_URL` is required.
+
+**Sentry alert rules** (Sentry → Alerts → Create alert → *Issues*; action: send a notification to your email or team). Every event carries tags:
+
+| Rule | Filter (event tags) | Suggested trigger |
+|------|---------------------|-------------------|
+| Warehouse push gave up | `job` equals `warehouse-push` **and** `result` equals `conflict_gave_up` | every new event |
+| Warehouse push failed | `job` equals `warehouse-push` **and** `result` equals `failed` | every new event |
+| Repeated conflicts | `job` equals `warehouse-push` **and** `result` equals `conflict_gave_up` | more than 5 events in 1 hour (frequency) |
+| Reconcile failing | `job` equals `warehouse-reconcile` | every new event |
+| Stuck webhook | `kind` equals `webhook` **and** `reason` equals `stuck` | every new event |
+| Fulfillment failed | `job` equals `fulfillment-create` | every new event |
+| Sync failed | `kind` equals `job` **and** `job` is one of `catalog-full-sync`, `inventory-full-sync`, `orders-sync` | every new event |
+
+Ordinary conflicts (a sale between our read and our write) are expected and not reported; only giving up after the retries is. Personal data never reaches Sentry (`src/sentry-scrub.ts`).
+
 ## Locations and inventory
 
 Inventory lives in Postgres (`locations`, `inventory_items`, `inventory_levels`, `inventory_level_history`, `inventory_state`) and is kept in sync from the **Admin GraphQL API** (paged reads; no bulk operations). Nested levels are fetched in pages of 25; remaining pages for an item are always followed.

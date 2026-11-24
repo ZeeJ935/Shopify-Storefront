@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { inputClass } from "@/components/ui/Field";
+import { inputBase } from "@/components/ui/Field";
 import { IndexTable } from "@/components/ui/IndexTable";
 import { Page } from "@/components/ui/Page";
 import { Pagination } from "@/components/ui/Pagination";
@@ -31,8 +31,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       <IndexTable
         toolbar={
           <form className="flex flex-wrap items-end gap-2 p-3">
-            <input name="sku" placeholder="Exact SKU" defaultValue={sku ?? ""} aria-label="SKU" className={`${inputClass} w-44`} />
-            <select name="location_id" defaultValue={filters.location_id ?? ""} aria-label="Location" className={`${inputClass} w-48`}>
+            <input name="sku" placeholder="Exact SKU" defaultValue={sku ?? ""} aria-label="SKU" className={`${inputBase} w-44`} />
+            <select name="location_id" defaultValue={filters.location_id ?? ""} aria-label="Location" className={`${inputBase} w-48`}>
               <option value="">All locations</option>
               {locations.map((l) => (
                 <option key={l.id} value={l.id}>
@@ -40,7 +40,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
                 </option>
               ))}
             </select>
-            <select name="low_stock_below" defaultValue={filters.low_stock_below ?? ""} aria-label="Stock" className={`${inputClass} w-40`}>
+            <select name="low_stock_below" defaultValue={filters.low_stock_below ?? ""} aria-label="Stock" className={`${inputBase} w-40`}>
               <option value="">Any stock</option>
               <option value="1">Out of stock</option>
               <option value="6">Low stock (≤ 5)</option>

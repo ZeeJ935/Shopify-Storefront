@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { STUCK_AFTER_MINUTES } from "../webhooks/maintenance.js";
 import { createFavouritesRepo } from "./favourites.js";
+import { queueHealth } from "./queue-health.js";
 import { customers } from "./schema.js";
 
 export type CustomerRecord = { customerId: string; firstSeenAt: Date };
@@ -45,12 +46,16 @@ export function createDb(databaseUrl: string) {
         failed: string;
         stuck: string;
         oldest_stuck: Date | null;
+        reconcile_at: Date | null;
+        differences: number | null;
       }>(
         `select (select last_full_sync_at from catalog_state where id = 1) as last_sync,
                 (select last_full_sync_at from inventory_state where id = 1) as inventory_last_sync,
                 (select last_full_sync_at from orders_state where id = 1) as orders_last_sync,
                 (select count(*) from webhook_events where failed_at > now() - interval '24 hours') as failed,
-                stuck.count as stuck, stuck.oldest as oldest_stuck
+                stuck.count as stuck, stuck.oldest as oldest_stuck,
+                (select last_reconcile_at from warehouse_state where id = 1) as reconcile_at,
+                (select differences from warehouse_state where id = 1) as differences
          from (select count(*) as count, min(received_at) as oldest from webhook_events
                where processed_at is null and failed_at is null
                  and received_at < now() - make_interval(mins => $1)) stuck`,
@@ -63,6 +68,9 @@ export function createDb(databaseUrl: string) {
         failedWebhooks24h: Number(rows[0]?.failed ?? 0),
         stuckWebhooks: Number(rows[0]?.stuck ?? 0),
         oldestStuckWebhookAt: rows[0]?.oldest_stuck ?? null,
+        queues: await queueHealth(pool),
+        warehouseLastReconcileAt: rows[0]?.reconcile_at ?? null,
+        warehouseDifferences: rows[0]?.differences ?? null,
       };
     },
     close: () => pool.end(),
