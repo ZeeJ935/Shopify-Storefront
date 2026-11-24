@@ -51,6 +51,9 @@ describe.skipIf(!url)("warehouse push (Postgres + pg-boss)", () => {
     return u.toString();
   })();
   const pool = new pg.Pool({ connectionString: testUrl });
+  // Teardown drops the database; an idle client closed by that must not become an unhandled error.
+  pool.on("error", () => {});
+  root.on("error", () => {});
   const adapter = new MockWarehouse(pool);
   let enqueued: { pushId: number; itemGid: string }[] = [];
   const fakeEnqueue: EnqueueItem = async (_c, data) => {
@@ -188,23 +191,30 @@ describe.skipIf(!url)("warehouse push (Postgres + pg-boss)", () => {
   });
 
   describe("with pg-boss (stately per item)", () => {
-    let boss: PgBoss;
+    let boss: PgBoss | undefined;
+    // Each test gets its own pg-boss; the previous one is fully stopped (pool closed) first.
+    const stopBoss = async () => {
+      if (boss) await boss.stop({ graceful: true, timeout: 5000 }).catch(() => {});
+      boss = undefined;
+    };
     beforeEach(async () => {
-      boss?.stop({ graceful: false, timeout: 1 }).catch(() => {});
+      await stopBoss();
       boss = new PgBoss({ connectionString: testUrl, max: 4 });
       boss.on("error", () => {});
       await boss.start();
       await boss.deleteQueue("warehouse-push-item").catch(() => {});
     });
-    afterAll(async () => {
-      await boss?.stop({ graceful: false, timeout: 1000 });
-    });
+    afterAll(stopBoss);
+    const current = () => {
+      if (!boss) throw new Error("pg-boss not started");
+      return boss;
+    };
 
     it("an item with a queued job: the next push logs skipped_already_queued and finishes", async () => {
       await seed({ "SKU-A": 25 });
-      const jobs = createWarehouseJobs(boss);
+      const jobs = createWarehouseJobs(current());
       // Create the queue without a worker (so the first job stays queued).
-      await boss.createQueue("warehouse-push-item", { policy: "stately" });
+      await current().createQueue("warehouse-push-item", { policy: "stately" });
       const deps = { adapter, env: live, enqueue: jobs.enqueueItemOnClient };
       const first = await createPush(pool, deps, { key: "queued-key-01", request: req(), staffId: null });
       const second = await createPush(pool, deps, { key: "queued-key-02", request: req(), staffId: null });
@@ -217,7 +227,7 @@ describe.skipIf(!url)("warehouse push (Postgres + pg-boss)", () => {
 
     it("per-item ordering: two pushes for one item never run at once; other items run in parallel", async () => {
       await seed({ "SKU-A": 25, "SKU-B": 30 });
-      const jobs = createWarehouseJobs(boss);
+      const jobs = createWarehouseJobs(current());
       const fake = fakeShopify({ [`${ITEM_A}|${LOC}`]: 20, [`${ITEM_B}|${LOC}`]: 20 }, { delayMs: 250 });
       const active = new Map<string, number>();
       let maxPerItem = 0;
