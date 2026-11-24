@@ -63,6 +63,12 @@ export const AUDIT_DETAIL_KEYS: ReadonlySet<string> = new Set([
   "email_hash",
   "required_role",
   "route",
+  "sku",
+  "quantity",
+  "previous_quantity",
+  "item_count",
+  "allow_large_decrease",
+  "push_mode",
 ]);
 
 export function sanitizeDetail(detail: Record<string, unknown> | null | undefined): Record<string, unknown> | null {

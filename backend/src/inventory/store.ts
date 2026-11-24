@@ -22,7 +22,7 @@ export type InventoryStore = {
     itemShopifyId: string;
     locationShopifyId: string;
     level: RemoteLevel;
-    source: "webhook" | "sync";
+    source: "webhook" | "sync" | "warehouse";
   }): Promise<UpsertLevelResult>;
   deleteLocationByShopifyId(shopifyId: string): Promise<void>;
   /** Database clock at the start of a full sync; pass it to finishFullSync. */

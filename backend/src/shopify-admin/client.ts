@@ -1,13 +1,17 @@
 import type { TokenCache } from "./token.js";
 
-/** Thrown when a mutation returns non-empty userErrors (message text only). */
-export class ShopifyUserErrors extends Error {
-  readonly userErrors: { field?: string[] | null; message: string }[];
+export type AdminUserError = { field?: string[] | null; message: string; code?: string | null };
 
-  constructor(userErrors: { field?: string[] | null; message: string }[]) {
+/** Thrown when a mutation returns non-empty userErrors. `codes` holds each error's `code` when selected. */
+export class ShopifyUserErrors extends Error {
+  readonly userErrors: AdminUserError[];
+  readonly codes: string[];
+
+  constructor(userErrors: AdminUserError[]) {
     super(`Shopify Admin userErrors: ${userErrors.map((e) => e.message).join("; ").slice(0, 300)}`);
     this.name = "ShopifyUserErrors";
     this.userErrors = userErrors;
+    this.codes = [...new Set(userErrors.map((e) => e.code).filter((c): c is string => typeof c === "string"))];
   }
 }
 
@@ -62,16 +66,16 @@ export type CreateAdminClientOpts = {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function collectUserErrors(data: unknown): { field?: string[] | null; message: string }[] {
+function collectUserErrors(data: unknown): AdminUserError[] {
   if (!data || typeof data !== "object") return [];
-  const out: { field?: string[] | null; message: string }[] = [];
+  const out: AdminUserError[] = [];
   for (const value of Object.values(data as Record<string, unknown>)) {
     if (!value || typeof value !== "object") continue;
     const errs = (value as { userErrors?: unknown }).userErrors;
     if (!Array.isArray(errs)) continue;
     for (const e of errs) {
       if (e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string") {
-        out.push(e as { field?: string[] | null; message: string });
+        out.push(e as AdminUserError);
       }
     }
   }

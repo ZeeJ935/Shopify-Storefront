@@ -8,6 +8,10 @@ import { inventoryRoutes } from "../routes/inventory.js";
 import { ordersRoutes } from "../routes/orders.js";
 import { roleAtLeast, roleFor, type StaffRole } from "./allowlist.js";
 import { adminSearch, adminSummary } from "./insights.js";
+import { warehouseDiff } from "../warehouse/diff.js";
+import type { WarehouseEnv } from "../warehouse/env.js";
+import { MAX_WAREHOUSE_QUANTITY, type MockWarehouse } from "../warehouse/mock.js";
+import { createPush, getPush, MAX_PUSH_SKUS, type EnqueueItem } from "../warehouse/push.js";
 import { emailHash, type AuditEntry, type AuditOutcome, type AuditStore } from "./audit.js";
 import type { AdminEnv } from "./env.js";
 import { GoogleTokenError, type GoogleVerifier } from "./google.js";
@@ -39,7 +43,40 @@ export type AdminRouteDeps = {
   sync?: Partial<Record<SyncKind, (reason: string) => Promise<unknown>>>;
   /** Fulfillment job queue (absent when Admin API isn't configured: dry runs only). */
   enqueueFulfillment?: EnqueueActionOnClient;
+  /** Mock warehouse sync. Enqueuers are absent when the Shopify Admin API isn't configured. */
+  warehouse?: {
+    adapter: MockWarehouse;
+    env: WarehouseEnv;
+    enqueueItem?: EnqueueItem;
+    enqueueReconcile?: () => Promise<unknown>;
+  };
 };
+
+const warehousePushSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    skus: { type: "array", minItems: 1, maxItems: MAX_PUSH_SKUS, items: { type: "string", minLength: 1, maxLength: 100 } },
+    all: { type: "boolean" },
+    allow_large_decrease: { type: "boolean" },
+    dry_run: { type: "boolean" },
+  },
+} as const;
+type WarehousePushBody = { skus?: string[]; all?: boolean; allow_large_decrease?: boolean; dry_run?: boolean };
+
+const warehouseStockSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sku", "location_id", "quantity"],
+  properties: {
+    sku: { type: "string", minLength: 1, maxLength: 100 },
+    location_id: { type: "string", minLength: 1, maxLength: 100 },
+    quantity: { type: "integer", minimum: 0, maximum: MAX_WAREHOUSE_QUANTITY },
+  },
+} as const;
+type WarehouseStockBody = { sku: string; location_id: string; quantity: number };
+
+const toLocationGid = (id: string) => (/^\d{1,20}$/.test(id) ? `gid://shopify/Location/${id}` : /^gid:\/\/shopify\/Location\/\d{1,20}$/.test(id) ? id : null);
 
 /** One response for every sign-in/refresh failure, so callers learn nothing (e.g. allowlist membership). */
 const SIGN_IN_FAILED = { error: "sign_in_failed" } as const;
@@ -320,6 +357,106 @@ export function adminRoutes(app: FastifyInstance, deps: AdminRouteDeps) {
           );
         },
       );
+
+      // ---- Warehouse (mock) ----
+      const wh = deps.warehouse;
+      if (wh) {
+        s.get("/admin/warehouse/diff", async (request) => {
+          const only = (request.query as { only?: string }).only;
+          const rows = await warehouseDiff(wh.adapter, deps.pool, { maxDecrease: wh.env.maxDecrease });
+          const state = await deps.pool.query<{ last_reconcile_at: Date | null }>("select last_reconcile_at from warehouse_state where id = 1");
+          return {
+            mode: wh.env.pushMode,
+            maxDecrease: wh.env.maxDecrease,
+            lastReconcileAt: state.rows[0]?.last_reconcile_at?.toISOString() ?? null,
+            rows: only === "differences" ? rows.filter((r) => r.status !== "match") : rows,
+          };
+        });
+
+        s.get<{ Params: { key: string } }>("/admin/warehouse/pushes/:key", async (request, reply) => {
+          const found = await getPush(deps.pool, request.params.key);
+          if (!found) return reply.code(404).send({ error: "not_found" });
+          return found;
+        });
+
+        s.post<{ Body: WarehousePushBody }>(
+          "/admin/warehouse/push",
+          { preHandler: requireRole("operator", "warehouse.push"), schema: { body: warehousePushSchema } },
+          async (request, reply) => {
+            const key = readIdempotencyKey(request);
+            if (!key) return reply.code(400).send({ error: "invalid_idempotency_key" });
+            const b = request.body;
+            if (Boolean(b.skus) === Boolean(b.all)) return reply.code(400).send({ error: "send_either_skus_or_all" });
+            const pushRequest = {
+              skus: b.skus ? [...new Set(b.skus)].sort() : null,
+              all: b.all === true,
+              allowLargeDecrease: b.allow_large_decrease === true,
+              dryRun: b.dry_run === true,
+            };
+            return audited(
+              request,
+              reply,
+              {
+                action: "warehouse.push",
+                resourceType: "warehouse_push",
+                resourceId: key,
+                detail: { idempotency_key: key, dry_run: pushRequest.dryRun, allow_large_decrease: pushRequest.allowLargeDecrease, push_mode: wh.env.pushMode },
+              },
+              async () => {
+                if (!wh.enqueueItem) {
+                  return { result: "rejected", statusCode: 503, detail: { reason: "warehouse_not_configured" }, body: { error: "warehouse_not_configured" } };
+                }
+                const result = await createPush(deps.pool, { adapter: wh.adapter, env: wh.env, enqueue: wh.enqueueItem }, { key, request: pushRequest, staffId: request.staff!.id });
+                switch (result.kind) {
+                  case "key_reused":
+                    return { result: "rejected", statusCode: 409, detail: { reason: "idempotency_key_reused" }, body: { error: "idempotency_key_reused" } };
+                  case "nothing_to_push":
+                    return { result: "rejected", statusCode: 422, detail: { reason: "nothing_to_push" }, body: { error: "nothing_to_push" } };
+                  case "replayed":
+                    return { result: "success", statusCode: 200, detail: { replayed: true }, body: { push: result.push, replayed: true, mode: wh.env.pushMode } };
+                  case "created":
+                    return { result: "success", statusCode: 202, detail: { item_count: result.push.itemCount }, body: { push: result.push, mode: wh.env.pushMode } };
+                }
+              },
+            );
+          },
+        );
+
+        s.put<{ Body: WarehouseStockBody }>(
+          "/admin/warehouse/stock",
+          { preHandler: requireRole("admin", "warehouse.stock"), schema: { body: warehouseStockSchema } },
+          async (request, reply) => {
+            const loc = toLocationGid(request.body.location_id);
+            if (!loc) return reply.code(400).send({ error: "invalid_location_id" });
+            const sku = request.body.sku.trim();
+            return audited(
+              request,
+              reply,
+              { action: "warehouse.stock", resourceType: "warehouse_stock", resourceId: `${sku}@${loc}`, detail: { sku, quantity: request.body.quantity } },
+              async () => {
+                const known = await deps.pool.query("select 1 from locations where shopify_id = $1", [loc]);
+                if (!known.rowCount) return { result: "rejected", statusCode: 422, detail: { reason: "unknown_location" }, body: { error: "unknown_location" } };
+                const before = await deps.pool.query<{ quantity: number }>("select quantity from warehouse_stock where sku = $1 and location_shopify_id = $2", [sku, loc]);
+                const stock = await wh.adapter.setStock({ sku, locationShopifyId: loc, quantity: request.body.quantity, staffId: request.staff!.id });
+                return {
+                  result: "success",
+                  statusCode: 200,
+                  detail: { previous_quantity: before.rows[0]?.quantity ?? null },
+                  body: { stock, previousQuantity: before.rows[0]?.quantity ?? null },
+                };
+              },
+            );
+          },
+        );
+
+        s.post("/admin/warehouse/reconcile", { preHandler: requireRole("admin", "warehouse.reconcile") }, async (request, reply) =>
+          audited(request, reply, { action: "warehouse.reconcile", resourceType: "warehouse", resourceId: "reconcile" }, async () => {
+            if (!wh.enqueueReconcile) return { result: "rejected", statusCode: 503, detail: { reason: "warehouse_not_configured" }, body: { error: "warehouse_not_configured" } };
+            await wh.enqueueReconcile();
+            return { result: "success", statusCode: 202, body: { queued: true } };
+          }),
+        );
+      }
 
       s.post<{ Params: { kind: string } }>(
         "/admin/sync/:kind",

@@ -446,3 +446,80 @@ export const auditLog = pgTable(
     index("audit_log_resource_idx").on(t.resourceType, t.resourceId),
   ],
 );
+
+/**
+ * The mock warehouse's own stock (physical units per SKU per Shopify location). Edited
+ * through PUT /admin/warehouse/stock; a real warehouse adapter would read its own system.
+ */
+export const warehouseStock = pgTable(
+  "warehouse_stock",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    sku: text("sku").notNull(),
+    /** The Shopify location this stock maps to. */
+    locationShopifyId: text("location_shopify_id").notNull(),
+    quantity: integer("quantity").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedByStaffId: bigint("updated_by_staff_id", { mode: "number" }).references(() => staff.id, { onDelete: "set null" }),
+  },
+  (t) => [unique("warehouse_stock_sku_location_unique").on(t.sku, t.locationShopifyId)],
+);
+
+/** One row per push request (idempotency key), like fulfillment_actions. No personal data. */
+export const warehousePushes = pgTable(
+  "warehouse_pushes",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    /** { skus | all, allow_large_decrease, dry_run } only. */
+    request: jsonb("request").notNull(),
+    dryRun: boolean("dry_run").notNull(),
+    /** queued | running | done */
+    status: text("status").notNull(),
+    /** Inventory items this push covers; done when each has a final log row. */
+    itemCount: integer("item_count").notNull().default(0),
+    createdByStaffId: bigint("created_by_staff_id", { mode: "number" }).references(() => staff.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("warehouse_pushes_status_idx").on(t.status)],
+);
+
+/**
+ * Every push decision per item × location × attempt. Quantities are Shopify on_hand
+ * (from = live value read before setting, to = warehouse quantity). No personal data.
+ */
+export const stockPushLog = pgTable(
+  "stock_push_log",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    pushId: bigint("push_id", { mode: "number" })
+      .notNull()
+      .references(() => warehousePushes.id, { onDelete: "cascade" }),
+    inventoryItemShopifyId: text("inventory_item_shopify_id").notNull(),
+    /** Null for item-level rows (e.g. skipped_already_queued). */
+    locationShopifyId: text("location_shopify_id"),
+    sku: text("sku"),
+    fromQuantity: integer("from_quantity"),
+    toQuantity: integer("to_quantity"),
+    attempt: integer("attempt").notNull().default(1),
+    /** pushed | dry_run | conflict | conflict_gave_up | skipped_* | failed */
+    result: text("result").notNull(),
+    /** True on the row that ends this item's processing for the push. */
+    final: boolean("final").notNull().default(false),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("stock_push_log_push_idx").on(t.pushId),
+    index("stock_push_log_item_idx").on(t.inventoryItemShopifyId),
+    index("stock_push_log_created_idx").on(t.createdAt),
+  ],
+);
+
+/** One row: the last warehouse reconcile run (shown on /health). */
+export const warehouseState = pgTable("warehouse_state", {
+  id: integer("id").primaryKey().default(1),
+  lastReconcileAt: timestamp("last_reconcile_at", { withTimezone: true }),
+  differences: integer("differences").notNull().default(0),
+});

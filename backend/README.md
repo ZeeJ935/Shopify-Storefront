@@ -326,6 +326,26 @@ For the internal admin app (`admin/`, built separately). Entirely separate from 
 - **Remove someone:** delete them from `ADMIN_ALLOWLIST` and redeploy; their next request is refused.
 - Generate secrets with `openssl rand -base64 48`. Never reuse one secret for two variables (the service refuses to start).
 
+## Warehouse sync (mock warehouse)
+
+No real warehouse exists yet. `src/warehouse/adapter.ts` defines the `WarehouseAdapter` interface (`getStock(sku)`, `listStock()`); `MockWarehouse` keeps its stock in `warehouse_stock` (SKU × Shopify location × quantity), edited with `PUT /admin/warehouse/stock`. A real warehouse would be another adapter.
+
+**Why `on_hand`:** the warehouse reports **physical** stock, which is Shopify's `on_hand`. Pushes set `on_hand`; Shopify then derives `available` (on_hand − committed − reserved), so units already committed to orders aren't sold twice. The diff shows `available` and `committed` read-only so staff can see what's sellable.
+
+**Diff** (`GET /admin/warehouse/diff`, viewer): each warehouse row vs our Shopify mirror — `match`, `differs`, `large_decrease` (warehouse − on_hand below −`WAREHOUSE_MAX_DECREASE`), or why it can't be pushed: `unknown_location`, `unknown_sku`, `ambiguous_sku` (SKU on more than one item — never guessed), `untracked`, `not_stocked`. `stale` marks mirror levels older than 30 min; the **`warehouse-reconcile`** job (every 30 min, or `POST /admin/warehouse/reconcile`) re-reads them live from Shopify (`shouldApply` ordering) and records the difference count in `warehouse_state`.
+
+**Push** (`POST /admin/warehouse/push`, operator, `Idempotency-Key`, body `{ "all": true }` or `{ "skus": [...] }`, optional `allow_large_decrease`, `dry_run`):
+- The audit row is written **before** anything happens (fail closed); same key + body replays, another body is `409`, nothing pushable is `422`.
+- One `warehouse-push-item` job per inventory item, pg-boss **`stately`** policy keyed by item: one active + one queued per item, so two pushes for an item never run at once. A push for an item that already has a queued job logs `skipped_already_queued` for that item so the push still finishes. An advisory lock per item is a second guard.
+- Per location the job reads Shopify's **live** `on_hand`, reads the warehouse quantity, then: equal → `skipped_no_change`; decrease beyond the threshold without `allow_large_decrease` → `skipped_large_decrease`; dry run → `dry_run` (logs from → to, sends nothing); otherwise `inventorySetQuantities` (`name: "on_hand"`, `reason: "correction"`, `changeFromQuantity` = the live on_hand, required `@idempotent` key derived from push × item × location × attempt × from).
+- **`CHANGE_FROM_QUANTITY_STALE`** (a sale or another change landed after our read): Shopify is **not** changed; logged `conflict`, re-read, retried up to 3 times, then `conflict_gave_up` (reported to Sentry).
+- Every decision is in `stock_push_log`; `GET /admin/warehouse/pushes/:key` shows the push and its log. No personal data anywhere.
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `WAREHOUSE_PUSH_MODE` | `dry_run` | Global switch. `dry_run` = every push only logs what it would set. Set `live` to write to Shopify. |
+| `WAREHOUSE_MAX_DECREASE` | `10` | Largest on_hand decrease a push may make without `allow_large_decrease`. |
+
 ## Deploy on Render
 
 `render.yaml` (repo root) defines the API and its Postgres.

@@ -29,6 +29,11 @@ import { createOrdersJobs } from "./orders/jobs.js";
 import { createOrdersStore } from "./orders/store.js";
 import { fullSync as ordersFullSync } from "./orders/sync.js";
 import { createWebhookQueue } from "./queue.js";
+import { createWarehouseJobs } from "./warehouse/jobs.js";
+import { MockWarehouse } from "./warehouse/mock.js";
+import { failPushItem, runPushItem } from "./warehouse/push.js";
+import { reconcileWarehouse } from "./warehouse/reconcile.js";
+import { createStockShopify } from "./warehouse/shopify.js";
 import { createWebhookMaintenanceJobs, createWebhookMaintenanceStore, recoverStuckWebhooks } from "./webhooks/maintenance.js";
 import { createRevalidator, processWebhookEvent } from "./webhooks/process.js";
 import { createReporter } from "./report.js";
@@ -74,6 +79,8 @@ const catalogJobs = createCatalogJobs(queue.boss, report);
 const inventoryJobs = createInventoryJobs(queue.boss, report);
 const ordersJobs = createOrdersJobs(queue.boss, report);
 const fulfillmentJobs = createFulfillmentJobs(queue.boss, report);
+const warehouseJobs = createWarehouseJobs(queue.boss, report);
+const warehouse = new MockWarehouse(db.pool);
 const inventoryStore = createInventoryStore(db.pool);
 const ordersStore = createOrdersStore(db.pool);
 const inventorySource = admin ? createAdminInventorySource(admin) : null;
@@ -174,6 +181,12 @@ const app = buildApp({
           orders: ordersSource ? ordersJobs.enqueueFullSync : undefined,
         },
         enqueueFulfillment: admin ? fulfillmentJobs.enqueueOnClient : undefined,
+        warehouse: {
+          adapter: warehouse,
+          env: env.warehouse,
+          enqueueItem: inventorySource ? warehouseJobs.enqueueItemOnClient : undefined,
+          enqueueReconcile: inventorySource ? warehouseJobs.enqueueReconcile : undefined,
+        },
       }
     : undefined,
   logger: { level: process.env.LOG_LEVEL ?? "info" },
@@ -232,6 +245,27 @@ if (admin) {
       app.log.info({ actionId, result }, "fulfillment action");
     },
     onFinalFailure: (actionId, error) => markFulfillmentActionFailed(db.pool, actionId, error),
+  });
+}
+
+// Warehouse (mock) → Shopify on_hand pushes and the 30-minute reconcile (needs Admin).
+if (admin && inventorySource) {
+  const stockShopify = createStockShopify(admin, inventorySource);
+  const refreshLevel = async (itemGid: string, locationGid: string) => {
+    const remote = await inventorySource.inventoryLevel(itemGid, locationGid);
+    if (!remote) return;
+    const itemId = await inventoryStore.ensureItemId(remote.itemShopifyId);
+    const locationId = await inventoryStore.ensureLocationId(remote.locationShopifyId);
+    await inventoryStore.upsertLevel({ itemId, locationId, itemShopifyId: remote.itemShopifyId, locationShopifyId: remote.locationShopifyId, level: remote, source: "warehouse" });
+  };
+  if (env.warehouse.pushMode === "dry_run") console.info("[warehouse] WAREHOUSE_PUSH_MODE is dry_run: pushes only log what they would set.");
+  await warehouseJobs.start({
+    runItem: (data) => runPushItem({ pool: db.pool, adapter: warehouse, shopify: stockShopify, env: env.warehouse, refreshLevel, report }, data),
+    onFinalFailure: (data, error) => failPushItem(db.pool, data, error),
+    reconcile: async () => {
+      const result = await reconcileWarehouse({ pool: db.pool, adapter: warehouse, source: inventorySource, store: inventoryStore, maxDecrease: env.warehouse.maxDecrease });
+      app.log.info(result, "warehouse reconcile finished");
+    },
   });
 }
 

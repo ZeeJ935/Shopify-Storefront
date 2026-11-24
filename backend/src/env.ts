@@ -1,4 +1,5 @@
 import { readAdminEnv, type AdminEnv } from "./admin/env.js";
+import { readWarehouseEnv, type WarehouseEnv } from "./warehouse/env.js";
 import { DEFAULT_ADMIN_API_VERSION } from "./shopify-admin/index.js";
 
 export type Env = {
@@ -24,6 +25,8 @@ export type Env = {
   debugRoutes: boolean;
   /** Staff admin (/admin/*). Undefined = off. */
   staffAdmin?: AdminEnv;
+  /** Warehouse push mode (dry_run unless WAREHOUSE_PUSH_MODE=live) and the large-decrease threshold. */
+  warehouse: WarehouseEnv;
 };
 
 /** Reads and validates the service's environment. Throws with a clear message when something is missing. */
@@ -71,5 +74,6 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     backendPublicUrl,
     debugRoutes: source.SENTRY_DEBUG?.trim() === "1",
     staffAdmin: readAdminEnv(source),
+    warehouse: readWarehouseEnv(source),
   };
 }
