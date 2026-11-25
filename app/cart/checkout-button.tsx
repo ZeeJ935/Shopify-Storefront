@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCart } from "@/app/components/cart-provider";
 import PendingButtonLabel from "@/app/components/pending-button-label";
 
@@ -22,6 +22,16 @@ export default function CheckoutButton({
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const safe = checkoutUrl.startsWith("https://");
+
+  // Coming back from checkout with the Back button restores this page from the
+  // back-forward cache, frozen mid-redirect. Reset the button when that happens.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setRedirecting(false);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   async function handleClick() {
     if (redirecting || stockBlocked) {
