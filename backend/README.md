@@ -19,7 +19,7 @@ The token is checked first, so a caller without it learns nothing about the othe
 
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
-| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, inventory: { lastSyncAt, stale }, orders: { lastSyncAt, stale }, webhooks: { failedLast24h, stuck, oldestStuckAt }, adminApi? }`. `503` only when the database is down; a stale catalog/inventory/orders sync (none in 26 h), failed or stuck webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
+| GET | `/health` | none | `{ ok, db, catalog: { lastSyncAt, stale }, inventory: { lastSyncAt, stale }, orders: { lastSyncAt, stale }, webhooks: { failedLast24h, stuck, oldestStuckAt }, queues, queuesWarning, warehouse, adminApi? }` (queue and warehouse fields: see Monitoring). `503` only when the database is down; a stale catalog/inventory/orders sync (none in 26 h), failed or stuck webhooks, or Admin API warning are fields, not a failure. `adminApi` is present only when Admin credentials are configured |
 | GET | `/v1/inventory/locations` | token | All locations (`id`, name, active, fulfillsOnlineOrders) |
 | GET | `/v1/inventory/levels` | token | Levels with optional `sku`, `location_id`, `low_stock_below`, `cursor`, `limit` (≤100). Keyset pagination; `nextCursor` when more |
 | GET | `/v1/inventory/items/:id` | token | Item by Shopify GID or numeric id, levels per location, last 20 history rows |
@@ -339,7 +339,7 @@ For the internal admin app (`admin/`, built separately). Entirely separate from 
 | GET | `/admin/audit?before=&limit=` | admin (newest first) |
 
 **Audit log** (`audit_log`): staff id/email, role, action, resource, result, status, request id, small `detail` (allowlisted keys only). Never customer data or request bodies.
-- **Changes fail closed:** `POST /admin/fulfillments` and `POST /admin/sync/*` write a `pending` row **before** acting; if that write fails the action is refused (`503 audit_unavailable`). The row is then completed (`success`, `rejected`, `error`).
+- **Changes fail closed:** `POST /admin/fulfillments`, `POST /admin/sync/*`, `POST /admin/warehouse/push`, `PUT /admin/warehouse/stock` and `POST /admin/warehouse/reconcile` write a `pending` row **before** acting; if that write fails the action is refused (`503 audit_unavailable`). The row is then completed (`success`, `rejected`, `error`).
 - **Best effort:** sign-ins (`auth.login`), refused refreshes, and every `403` (`denied`). A rejected sign-in stores only a keyed hash of the email.
 
 **Customer details:** the dashboard and these routes show **no customer names, emails or addresses** — we don't store them. If staff need them, they look the order up **in Shopify admin by its order number** (e.g. `#1007`).

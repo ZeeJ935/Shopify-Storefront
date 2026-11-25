@@ -1,3 +1,5 @@
+> **Historical document.** This audit is dated 2026-10-28 and describes the storefront before the backend, the Postgres catalog, CI and Project 3 existed. Several findings are superseded (it says there is no Postgres, no CI or tests, favourites in a Shopify metafield, and webhooks handled by the storefront). For the current system see [ARCHITECTURE.md](ARCHITECTURE.md) and [LIMITS.md](LIMITS.md).
+
 # Complete Shopify Storefront Architecture & Expertise Audit
 
 **Repository:** `zj-headless-storefront`  
