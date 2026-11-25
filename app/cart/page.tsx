@@ -4,6 +4,8 @@ import { Suspense } from "react";
 import SiteContainer from "@/app/components/site-container";
 import { getCart, toClientCart, updateCartLines, type Cart } from "@/lib/cart";
 import { refreshLine, withFreshDiscounts } from "@/lib/cart-refresh";
+import type { OfferHint } from "@/lib/offer-hint";
+import { getOfferHint } from "@/lib/offers";
 import { reportError } from "@/lib/report-error";
 import { CART_COOKIE } from "@/lib/cart-cookie";
 import CartRecommendations from "./cart-recommendations";
@@ -27,6 +29,7 @@ export default async function CartPage() {
   const cartId = cookieStore.get(CART_COOKIE)?.value;
 
   let cart: Cart | null = null;
+  let offerHint: OfferHint | null = null;
 
   if (cartId) {
     let fetched;
@@ -61,12 +64,20 @@ export default async function CartPage() {
         )
       : fetched;
     cart = toClientCart(fresh);
+
+    // Buy X Get Y prompt; a failure only hides it.
+    try {
+      offerHint = await getOfferHint(fresh);
+    } catch (error) {
+      reportError(error, { area: "offer-hint" });
+    }
   }
 
   return (
     <main>
       <CartView
         initialCart={cart}
+        initialOfferHint={offerHint}
         recommendations={<Recommendations cart={cart} />}
       />
     </main>

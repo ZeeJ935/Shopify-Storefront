@@ -6,6 +6,8 @@ import { createRateLimiter, isSameOrigin } from "../lib/rate-limit";
 import { mapProductNode, salePercentOff } from "../lib/products";
 import type { Cart, CartLine } from "../lib/cart";
 import { applyPendingEdits } from "../lib/cart-edits";
+import { estimatedShipping } from "../lib/cart-shipping";
+import { offerHint, parseOffers, type HintLine, type PublicOffer } from "../lib/offer-hint";
 import { CART_REFRESH_AFTER_MS, isCartStale, refreshLine, withFreshDiscounts } from "../lib/cart-refresh";
 import { isSoldOutAdd, SOLD_OUT_MESSAGE, toNotices } from "../lib/cart-notices";
 import {
@@ -254,7 +256,7 @@ function cartLine(
       currentlyNotInStock: false,
       quantityAvailable: 20,
       image: null,
-      product: { title: `Product ${id}`, handle: `product-${id}` },
+      product: { id: `gid://shopify/Product/${id}`, title: `Product ${id}`, handle: `product-${id}` },
     },
     discountAllocations: options.discounted
       ? [
@@ -286,6 +288,7 @@ function cartOf(lines: CartLine[], subtotal: string, total: string): Cart {
       totalAmount: usd(total),
       checkoutChargeAmount: usd(total),
     },
+    shipping: null,
     lines,
   };
 }
@@ -847,6 +850,82 @@ async function testCartRefresh() {
   assert.equal(refreshLine([]), null);
 }
 
+function testEstimatedShipping() {
+  const pkr = (amount: string) => ({ amount, currencyCode: "PKR" });
+  assert.equal(estimatedShipping(undefined), null);
+  assert.equal(estimatedShipping({ nodes: [{ selectedDeliveryOption: null }] }), null);
+  assert.deepEqual(estimatedShipping({ nodes: [{ selectedDeliveryOption: { title: "Standard", estimatedCost: pkr("28100.0") } }] }), {
+    title: "Standard",
+    cost: pkr("28100"),
+  });
+  assert.deepEqual(
+    estimatedShipping({
+      nodes: [
+        { selectedDeliveryOption: { title: "Standard", estimatedCost: pkr("100") } },
+        { selectedDeliveryOption: { title: "Express", estimatedCost: pkr("250.5") } },
+      ],
+    }),
+    { title: null, cost: pkr("350.5") },
+  );
+}
+
+function testOfferHint() {
+  const now = Date.parse("2026-11-26T12:00:00Z");
+  const offer: PublicOffer = {
+    type: "BUY_X_GET_Y",
+    title: "Buy 2 get 1 free",
+    startsAt: "2026-11-25T05:00:00Z",
+    endsAt: "2026-12-01T04:59:59Z",
+    buyQuantity: 2,
+    getQuantity: 1,
+    percent: 100,
+    limitPerOrder: 1,
+    target: { kind: "COLLECTIONS", collectionIds: ["gid://shopify/Collection/9"] },
+  };
+  const line = (id: string, quantity: number, unitPrice: number, inOffer = true, maxQuantity = 10): HintLine => ({
+    productId: `gid://shopify/Product/${id}`,
+    collectionIds: inOffer ? ["gid://shopify/Collection/9"] : ["gid://shopify/Collection/1"],
+    variantId: `gid://shopify/ProductVariant/${id}`,
+    title: `Item ${id}`,
+    quantity,
+    unitPrice,
+    maxQuantity,
+  });
+
+  // 2 eligible units: one more completes the set; the cheapest eligible item is offered.
+  assert.deepEqual(offerHint([offer], [line("bag", 1, 7900), line("cap", 1, 5100), line("x", 3, 100, false)], now), {
+    title: "Buy 2 get 1 free",
+    message: "Add 1 more eligible item — the cheapest one is free.",
+    add: { variantId: "gid://shopify/ProductVariant/cap", title: "Item cap" },
+  });
+  // 1 eligible unit: not close yet. 3 units: limit 1 reached. 4 units with limit 2: not close.
+  assert.equal(offerHint([offer], [line("bag", 1, 7900)], now), null);
+  assert.equal(offerHint([offer], [line("bag", 3, 7900)], now), null);
+  assert.equal(offerHint([{ ...offer, limitPerOrder: 2 }], [line("bag", 4, 7900)], now), null);
+  // 5 units with limit 2: one more makes the second set.
+  assert.equal(offerHint([{ ...offer, limitPerOrder: 2 }], [line("bag", 5, 7900)], now)?.add?.title, "Item bag");
+  // Cheapest item at its stock limit: message only, no button.
+  assert.equal(offerHint([offer], [line("bag", 2, 7900, true, 2)], now)?.add, null);
+  // Products target, partial discount, Y = 2.
+  const products: PublicOffer = { ...offer, getQuantity: 2, percent: 50, target: { kind: "PRODUCTS", productIds: ["gid://shopify/Product/bag"] } };
+  assert.deepEqual(offerHint([products], [line("bag", 2, 7900)], now), {
+    title: "Buy 2 get 1 free",
+    message: "Add 2 more eligible items — the cheapest 2 are 50% off.",
+    add: null,
+  });
+  // Not live: before start, after end.
+  assert.equal(offerHint([offer], [line("bag", 2, 7900)], Date.parse("2026-11-25T04:00:00Z")), null);
+  assert.equal(offerHint([offer], [line("bag", 2, 7900)], Date.parse("2026-12-01T05:00:00Z")), null);
+
+  // Metafield parsing: valid kept, malformed dropped.
+  assert.deepEqual(parseOffers(JSON.stringify({ version: 1, offers: [offer, { ...offer, buyQuantity: 0 }, { type: "OTHER" }] })), [offer]);
+  assert.deepEqual(parseOffers(JSON.stringify({ version: 2, offers: [offer] })), []);
+  assert.deepEqual(parseOffers("not json"), []);
+  assert.deepEqual(parseOffers(null), []);
+}
+
+testEstimatedShipping();
+testOfferHint();
 testLoadFavourites()
   .then(testCartRefresh)
   .then(testSharedRateLimit)

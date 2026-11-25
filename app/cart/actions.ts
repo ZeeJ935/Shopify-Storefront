@@ -12,6 +12,8 @@ import {
   type Cart,
   type CartMutationResult,
 } from "@/lib/cart";
+import type { OfferHint } from "@/lib/offer-hint";
+import { getOfferHint } from "@/lib/offers";
 import {
   CART_COOKIE,
   cartCookieClearOptions,
@@ -115,6 +117,25 @@ function addResult(
     return { success: false, message: SOLD_OUT_MESSAGE };
   }
   return ok(result);
+}
+
+/**
+ * Read-only: the Buy X Get Y bag prompt for the current cart, or null. Recomputed
+ * from the cart in Shopify (never from browser data); failures just hide the prompt.
+ */
+export async function getCartOfferHint(): Promise<OfferHint | null> {
+  const cartId = await readCartId();
+  if (!cartId) {
+    return null;
+  }
+
+  try {
+    const cart = await getCart(cartId);
+    return cart ? await getOfferHint(cart) : null;
+  } catch (error) {
+    reportError(error, { area: "offer-hint" });
+    return null;
+  }
 }
 
 /** Read-only: the current cart for client hydration, or null when there is none. */

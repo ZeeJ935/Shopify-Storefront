@@ -12,9 +12,13 @@ import CartLineItem from "./cart-line-item";
 import CheckoutButton from "./checkout-button";
 import DiscountCodeForm from "./discount-code-form";
 import EmptyBag from "./empty-bag";
+import OfferPrompt from "./offer-prompt";
+import type { OfferHint } from "@/lib/offer-hint";
 
 type CartViewProps = {
   initialCart: Cart | null;
+  /** Buy X Get Y prompt for the first render (re-read after each cart change). */
+  initialOfferHint?: OfferHint | null;
   /** Server-streamed "You may also like" section. */
   recommendations?: ReactNode;
 };
@@ -25,6 +29,7 @@ function discountLabel(application: Cart["discountApplications"][number]) {
 
 export default function CartView({
   initialCart,
+  initialOfferHint = null,
   recommendations,
 }: CartViewProps) {
   const cart = useSeededCart(initialCart);
@@ -65,6 +70,12 @@ export default function CartView({
         </Link>
       </div>
 
+      <OfferPrompt
+        initialHint={initialOfferHint}
+        cartUpdatedAt={cart.updatedAt}
+        pending={pending}
+      />
+
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start lg:gap-16">
         <ul className="divide-y divide-mist border-y border-mist">
           {cart.lines.map((line) => (
@@ -103,6 +114,17 @@ export default function CartView({
                 </span>
               </div>
             ))}
+
+            {cart.shipping ? (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-steel">
+                  Shipping{cart.shipping.title ? ` (${cart.shipping.title})` : ""} · estimate
+                </span>
+                <span className="font-medium text-ink">
+                  {formatMoneyValue(cart.shipping.cost)}
+                </span>
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-between gap-4 border-t border-mist pt-4">
               <span className="font-display text-base font-semibold text-ink">

@@ -2,6 +2,7 @@ import {
   getCheckoutAllowedHosts,
   isSafeShopifyCheckoutUrl,
 } from "./checkout-url";
+import { estimatedShipping } from "./cart-shipping";
 import { shopifyFetch } from "./shopify";
 
 type Money = {
@@ -52,6 +53,7 @@ type CartLineNode = {
       altText: string | null;
     } | null;
     product: {
+      id: string;
       title: string;
       handle: string;
     };
@@ -76,6 +78,11 @@ type CartQueryCart = {
     subtotalAmount: Money;
     totalAmount: Money;
     checkoutChargeAmount: Money;
+  };
+  deliveryGroups?: {
+    nodes: {
+      selectedDeliveryOption: { title: string | null; estimatedCost: Money } | null;
+    }[];
   };
   lines: {
     edges: {
@@ -120,6 +127,16 @@ const cartFields = `
       ${moneyFields}
     }
   }
+  deliveryGroups(first: 5) {
+    nodes {
+      selectedDeliveryOption {
+        title
+        estimatedCost {
+          ${moneyFields}
+        }
+      }
+    }
+  }
   lines(first: 100) {
     edges {
       node {
@@ -137,6 +154,7 @@ const cartFields = `
               altText
             }
             product {
+              id
               title
               handle
             }
@@ -187,10 +205,11 @@ function isCompleteCartLine(line: CartLineNode): boolean {
 }
 
 function flattenCart(cart: CartQueryCart) {
-  const { lines, ...rest } = cart;
+  const { lines, deliveryGroups, ...rest } = cart;
 
   return {
     ...rest,
+    shipping: estimatedShipping(deliveryGroups),
     // Drop incomplete lines (e.g. non-ProductVariant merchandise after inline fragment).
     lines: lines.edges.map((edge) => edge.node).filter(isCompleteCartLine),
   };
