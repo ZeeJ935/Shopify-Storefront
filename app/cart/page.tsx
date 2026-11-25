@@ -2,7 +2,9 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import SiteContainer from "@/app/components/site-container";
-import { getCart, toClientCart, type Cart } from "@/lib/cart";
+import { getCart, toClientCart, updateCartLines, type Cart } from "@/lib/cart";
+import { refreshLine, withFreshDiscounts } from "@/lib/cart-refresh";
+import { reportError } from "@/lib/report-error";
 import { CART_COOKIE } from "@/lib/cart-cookie";
 import CartRecommendations from "./cart-recommendations";
 import CartView from "./cart-view";
@@ -49,7 +51,16 @@ export default async function CartPage() {
       redirect("/cart/clear");
     }
 
-    cart = toClientCart(fetched);
+    // Shopify only recalculates discounts when the cart changes; see lib/cart-refresh.ts.
+    const line = refreshLine(fetched.lines);
+    const fresh = line
+      ? await withFreshDiscounts(
+          fetched,
+          async () => (await updateCartLines(cartId, [line])).cart,
+          (error) => reportError(error, { area: "cart-refresh" }),
+        )
+      : fetched;
+    cart = toClientCart(fresh);
   }
 
   return (

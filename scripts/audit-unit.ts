@@ -6,6 +6,7 @@ import { createRateLimiter, isSameOrigin } from "../lib/rate-limit";
 import { mapProductNode, salePercentOff } from "../lib/products";
 import type { Cart, CartLine } from "../lib/cart";
 import { applyPendingEdits } from "../lib/cart-edits";
+import { CART_REFRESH_AFTER_MS, isCartStale, refreshLine, withFreshDiscounts } from "../lib/cart-refresh";
 import { isSoldOutAdd, SOLD_OUT_MESSAGE, toNotices } from "../lib/cart-notices";
 import {
   isBackorder,
@@ -793,7 +794,61 @@ testCsp();
 testCspReports();
 testSentryScrub();
 testReportErrorWithSentryOff();
+async function testCartRefresh() {
+  const now = Date.parse("2026-11-25T12:00:00Z");
+  const old = { updatedAt: new Date(now - CART_REFRESH_AFTER_MS).toISOString(), lines: [{ id: "l1", quantity: 2 }] };
+  const recent = { ...old, updatedAt: new Date(now - 60_000).toISOString() };
+
+  assert.equal(isCartStale(old.updatedAt, now), true);
+  assert.equal(isCartStale(recent.updatedAt, now), false);
+  assert.equal(isCartStale("not a date", now), false);
+
+  // Recent cart: no refresh call.
+  let calls = 0;
+  const refreshed = { ...old, updatedAt: new Date(now).toISOString() };
+  const refresh = async () => {
+    calls += 1;
+    return refreshed;
+  };
+  assert.equal(await withFreshDiscounts(recent, refresh, () => assert.fail("no error expected"), now), recent);
+  assert.equal(calls, 0);
+
+  // Old cart: refreshed once; lines unchanged.
+  const got = await withFreshDiscounts(old, refresh, () => assert.fail("no error expected"), now);
+  assert.equal(calls, 1);
+  assert.equal(got, refreshed);
+  assert.deepEqual(got.lines, old.lines);
+
+  // Refresh fails: the fetched cart is used and the error is reported.
+  const errors: unknown[] = [];
+  const fallback = await withFreshDiscounts(
+    old,
+    async () => {
+      throw new Error("Shopify down");
+    },
+    (error) => errors.push(error),
+    now,
+  );
+  assert.equal(fallback, old);
+  assert.equal(errors.length, 1);
+
+  // Which line is re-sent: never one Shopify would lower (over stock / sold out).
+  const m = (availableForSale: boolean, quantityAvailable: number | null) => ({ availableForSale, quantityAvailable });
+  assert.deepEqual(
+    refreshLine([
+      { id: "over", quantity: 5, merchandise: m(true, 2) },
+      { id: "soldout", quantity: 1, merchandise: m(false, 0) },
+      { id: "ok", quantity: 3, merchandise: m(true, 3) },
+    ]),
+    { id: "ok", quantity: 3 },
+  );
+  assert.deepEqual(refreshLine([{ id: "untracked", quantity: 4, merchandise: m(true, null) }]), { id: "untracked", quantity: 4 });
+  assert.equal(refreshLine([{ id: "over", quantity: 5, merchandise: m(true, 2) }]), null);
+  assert.equal(refreshLine([]), null);
+}
+
 testLoadFavourites()
+  .then(testCartRefresh)
   .then(testSharedRateLimit)
   .then(() => console.log("audit-unit: all assertions passed"))
   .catch((error) => {

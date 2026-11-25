@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useCart } from "@/app/components/cart-provider";
 import PendingButtonLabel from "@/app/components/pending-button-label";
 
@@ -19,19 +20,23 @@ export default function CheckoutButton({
   stockBlocked = false,
 }: CheckoutButtonProps) {
   const { flush } = useCart();
+  const router = useRouter();
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const safe = checkoutUrl.startsWith("https://");
 
   // Coming back from checkout with the Back button restores this page from the
-  // back-forward cache, frozen mid-redirect. Reset the button when that happens.
+  // back-forward cache, frozen mid-redirect. Reset the button and reload the bag
+  // from the server (which refreshes stale discounts, see lib/cart-refresh.ts).
   useEffect(() => {
     const onPageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) setRedirecting(false);
+      if (!event.persisted) return;
+      setRedirecting(false);
+      router.refresh();
     };
     window.addEventListener("pageshow", onPageShow);
     return () => window.removeEventListener("pageshow", onPageShow);
-  }, []);
+  }, [router]);
 
   async function handleClick() {
     if (redirecting || stockBlocked) {

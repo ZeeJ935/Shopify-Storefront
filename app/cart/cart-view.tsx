@@ -116,7 +116,7 @@ export default function CartView({
           </div>
 
           <p className="mt-3 text-xs leading-relaxed text-steel">
-            Shipping and taxes calculated at checkout.
+            Discounts, shipping and taxes confirmed at checkout.
           </p>
 
           <DiscountCodeForm discountCodes={cart.discountCodes} />
